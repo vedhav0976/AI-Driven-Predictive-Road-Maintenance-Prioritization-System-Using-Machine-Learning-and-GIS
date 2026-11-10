@@ -1,0 +1,27 @@
+{
+  "provenance": "User-provided Ultralytics validation console output",
+  "checkpoint_sha256": "4A2452236F9C3F6A7A105D7466EE749989831BB7098407F4D78F696BB4D0633F",
+  "validation_dataset": "RDD2022 validation run (reported)",
+  "validation_images": 5758,
+  "instances": 9740,
+  "precision": 0.641,
+  "recall": 0.584,
+  "map50": 0.620,
+  "map5095": 0.337,
+  "fused_layers": 72,
+  "fused_parameters": 11127519,
+  "gflops": 28.4,
+  "speed_ms": {
+    "preprocess": 0.2,
+    "inference": 4.6,
+    "loss": 0.0,
+    "postprocess": 0.9
+  },
+  "per_class": [
+    {"name": "D00_Longitudinal_Crack", "images": 2011, "instances": 3890, "precision": 0.621, "recall": 0.544, "map50": 0.578, "map5095": 0.326},
+    {"name": "D10_Transverse_Crack", "images": 1158, "instances": 1769, "precision": 0.605, "recall": 0.537, "map50": 0.562, "map5095": 0.276},
+    {"name": "D20_Alligator_Crack", "images": 1222, "instances": 1553, "precision": 0.674, "recall": 0.632, "map50": 0.679, "map5095": 0.364},
+    {"name": "Other_Damage", "images": 1093, "instances": 1563, "precision": 0.671, "recall": 0.770, "map50": 0.787, "map5095": 0.497},
+    {"name": "D40_Pothole", "images": 544, "instances": 965, "precision": 0.635, "recall": 0.436, "map50": 0.494, "map5095": 0.222}
+  ]
+}

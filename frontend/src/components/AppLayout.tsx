@@ -1,7 +1,10 @@
 import {
+  BarChart3,
+  BrainCircuit,
   ChevronRight,
   ClipboardCheck,
   FileText,
+  History,
   LayoutDashboard,
   LogOut,
   Map,
@@ -28,6 +31,21 @@ const navigation = [
     path: "/road-assessment",
     icon: ClipboardCheck,
   },
+  {
+    label: "AI Damage Analysis",
+    path: "/ai-analysis",
+    icon: BrainCircuit,
+  },
+  {
+    label: "History",
+    path: "/history",
+    icon: History,
+  },
+  {
+    label: "Model Performance",
+    path: "/model-performance",
+    icon: BarChart3,
+  },
 ];
 
 const secondaryNavigation = [
@@ -50,7 +68,7 @@ function AppLayout() {
 
   const currentPage =
     [...navigation, ...secondaryNavigation].find(
-      (item) => item.path === location.pathname
+      (item) => location.pathname === item.path || location.pathname.startsWith(`${item.path}/`)
     )?.label || "Dashboard";
 
   const handleLogout = () => {

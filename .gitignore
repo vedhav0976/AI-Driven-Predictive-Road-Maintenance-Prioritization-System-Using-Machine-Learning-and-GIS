@@ -1,0 +1,9 @@
+backend/storage/
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+__pycache__/
+*.pyc
+.venv/
+.venv_short/
+data/osm_roads.geojson

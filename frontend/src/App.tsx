@@ -6,6 +6,7 @@ import Dashboard from "./pages/Dashboard";
 import RoadMap from "./pages/RoadMap";
 import RoadAssessment from "./pages/RoadAssessment";
 import AIDamageAnalysis from "./pages/AIDamageAnalysis";
+import History from "./pages/History";
 import ModelPerformance from "./pages/ModelPerformance";
 import ProjectOverview from "./pages/ProjectOverview";
 import Settings from "./pages/Settings";
@@ -21,6 +22,8 @@ function App() {
           <Route path="/road-map" element={<RoadMap />} />
           <Route path="/road-assessment" element={<RoadAssessment />} />
           <Route path="/ai-analysis" element={<AIDamageAnalysis />} />
+          <Route path="/history" element={<History />} />
+          <Route path="/history/:recordId" element={<History />} />
           <Route path="/model-performance" element={<ModelPerformance />} />
           <Route path="/project-overview" element={<ProjectOverview />} />
           <Route path="/settings" element={<Settings />} />

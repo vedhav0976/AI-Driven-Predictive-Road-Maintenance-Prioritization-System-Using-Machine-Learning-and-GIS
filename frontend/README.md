@@ -1,86 +1,12 @@
-# React + TypeScript + Vite
+# Road Resilience frontend
 
-## Deploy to Vercel
+React, TypeScript, and Vite frontend for the Road Resilience prototype. See the [project README](../README.md) for architecture, setup, backend artifacts, API, and limitations.
 
-Create a Vercel project with `frontend` as the root directory and `npm run build` as
-the build command. Set `VITE_API_URL` to the public URL of the separately hosted
-FastAPI backend. Vercel serves the React dashboard; the YOLO inference API remains
-a Python service because its model and runtime are not suitable for a serverless
-function.
-
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
-
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is enabled on this template. See [this documentation](https://react.dev/learn/react-compiler) for more information.
-
-Note: This will impact Vite dev & build performances.
-You can also try [the experimental native React Compiler support in plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md#rust-react-compiler) by using `compiler: true` in the plugin options instead of using the Babel plugin.
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
+The dashboard loads saved uploads and optional Mapillary observations from FastAPI. AI Damage Analysis has a single/bulk toggle. Bulk mode adds images or a folder to a visible queue, processes files one at a time, and shows both image previews and each result. GPS is read automatically from EXIF metadata or a visible coordinate stamp. Road Assessment can recheck GPS from a saved image. The History menu searches saved analyses and opens their original and annotated images with detection details. The road map and road assessment load saved analyses from `/api/map` and `/api/observations`, refreshing every 30 seconds. The model pages are available from the sidebar.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
-```
+For a single Vercel project with services, use the repository-root `vercel.json` and leave `VITE_API_URL` unset. The browser then calls `/api` on the same domain. For a separate frontend project with a Render backend, set the project root to `frontend`, set `VITE_API_URL` to Render's HTTPS origin, and add the Vercel origin to Render's `ROAD_RESILIENCE_CORS`. Run `npm run build` and `npm run lint` to check changes.

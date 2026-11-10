@@ -1,6 +1,5 @@
-const API_BASE =
-  import.meta.env.VITE_API_URL ??
-  (import.meta.env.DEV ? "http://127.0.0.1:8000" : "/api");
+const API_BASE = (import.meta.env.VITE_API_URL ??
+  (import.meta.env.DEV ? "http://127.0.0.1:8000" : "")).replace(/\/+$/, "");
 
 export type ModelInfo = {
   name: string;
@@ -23,8 +22,35 @@ export type Detection = {
   bbox: number[];
 };
 
+export type SavedAnalysisSummary = {
+  id: number;
+  filename: string;
+  detection_count: number;
+  inference_ms: number;
+  created_at: string;
+  annotated_image_url: string;
+  latitude: number | null;
+  longitude: number | null;
+  road_id: string | null;
+  road_name: string | null;
+  location_status: string;
+  location_source: string | null;
+  pci_proxy: number | null;
+  mpi_proxy: number | null;
+  priority: "High" | "Medium" | "Low" | null;
+};
+
+export type SavedAnalysisDetail = SavedAnalysisSummary & {
+  detections: Detection[];
+  snap_distance_m: number | null;
+  snapped_latitude: number | null;
+  snapped_longitude: number | null;
+  scoring_basis: string | null;
+};
+
 export type Metrics = {
   available: boolean;
+  reported?: boolean;
   checkpoint: string;
   run?: string;
   validation_dataset?: string | null;
@@ -35,11 +61,27 @@ export type Metrics = {
   map5095?: number | null;
   source?: string;
   per_class_available?: boolean;
+  validation_images?: number;
+  instances?: number;
+  fused_layers?: number;
+  fused_parameters?: number;
+  gflops?: number;
+  speed_ms?: { preprocess: number; inference: number; loss: number; postprocess: number };
+  per_class?: Array<{
+    name: string;
+    images: number;
+    instances: number;
+    precision: number;
+    recall: number;
+    map50: number;
+    map5095: number;
+  }>;
   limitations?: string[];
 };
 
 export type DashboardData = {
   images_processed: number;
+  uploaded_images: number;
   detections: number;
   geolocated_observations: number;
   unmatched_observations: number;
@@ -47,11 +89,29 @@ export type DashboardData = {
   priority_distribution: Record<string, number>;
   model_metrics: Metrics;
   model: ModelInfo;
+  recent_uploads: Array<{
+    id: number;
+    filename: string;
+    detection_count: number;
+    inference_ms: number;
+    created_at: string;
+    latitude: number | null;
+    longitude: number | null;
+    road_id: string | null;
+    pci_proxy: number | null;
+    mpi_proxy: number | null;
+    priority: string | null;
+  }>;
   history: Array<{
     filename: string;
     damage_type: string;
     confidence: number;
     location_status: string;
+    source: string;
+    road_id?: string | null;
+    pci_proxy?: number | null;
+    mpi_proxy?: number | null;
+    priority?: string | null;
   }>;
   limitations: string[];
 };
@@ -64,6 +124,7 @@ export type Observation = {
   latitude: number | null;
   longitude: number | null;
   location_status: string;
+  location_source: string | null;
   road_id: string | null;
   source: string;
 };
@@ -87,6 +148,43 @@ export type RoadsData = {
   observations: Observation[];
   road_segment_matches: number;
   note: string;
+};
+
+export type InspectionObservation = {
+  id: number;
+  filename: string;
+  latitude: number | null;
+  longitude: number | null;
+  geolocated: boolean;
+  location_status: string;
+  location_source: string | null;
+  road_id: string | null;
+  pci_score: number | null;
+  mpi_score: number | null;
+  priority: "High" | "Medium" | "Low" | null;
+  detection_count: number;
+  damage_types: string[];
+  max_confidence: number | null;
+  annotated_image_url: string | null;
+  created_at: string;
+};
+
+export type PriorityMap = {
+  type: "FeatureCollection";
+  features: Array<{
+    type: "Feature";
+    id: string;
+    geometry: { type: "LineString"; coordinates: number[][] };
+    properties: {
+      road_name: string | null;
+      road_type: string | null;
+      criticality_factor: number;
+      pci_score: number | null;
+      mpi_score: number | null;
+      priority: "High" | "Medium" | "Low" | null;
+      color: string;
+    };
+  }>;
 };
 
 export type MapillaryRecord = {

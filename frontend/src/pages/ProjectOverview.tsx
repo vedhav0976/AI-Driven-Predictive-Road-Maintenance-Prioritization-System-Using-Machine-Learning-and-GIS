@@ -83,7 +83,7 @@ function ProjectOverview() {
             <Tech
               icon={<BrainCircuit />}
               title="AI / ML"
-              text="YOLO11n · Python · Ultralytics"
+              text="YOLO · Python · Ultralytics"
             />
 
             <Tech
@@ -111,7 +111,7 @@ function ProjectOverview() {
         <div className="panel">
           <div className="panel-header"><div><p className="panel-kicker">PROPOSED SOLUTION</p><h2>From image to maintenance review</h2></div></div>
           <div className="objective-list">
-            <div className="objective-item"><span>01</span><p>YOLO11n detects and classifies visible road damage in uploaded or geotagged imagery.</p></div>
+            <div className="objective-item"><span>01</span><p>YOLO detects and classifies visible road damage in uploaded imagery.</p></div>
             <div className="objective-item"><span>02</span><p>Mapillary coordinates place available observations on a Bengaluru Leaflet map.</p></div>
             <div className="objective-item"><span>03</span><p>Confidence-weighted observation scores help engineers review potential maintenance needs.</p></div>
           </div>
@@ -139,7 +139,7 @@ function ProjectOverview() {
           <FlowArrow />
 
           <FlowItem
-            title="YOLO11n"
+            title="YOLO"
             subtitle="Damage detection"
           />
 
