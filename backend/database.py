@@ -201,9 +201,7 @@ def delete_analysis(session: Session, record_id: int) -> str | None:
         session.execute(delete(DamageDetection).where(DamageDetection.observation_id == observation.id))
         session.delete(observation)
         session.flush()
-    asset = session.get(ImageAsset, record_id)
-    if asset is not None:
-        session.delete(asset)
+    session.execute(delete(ImageAsset).where(ImageAsset.record_id == record_id))
     filename = record.original_filename
     session.delete(record)
     session.flush()

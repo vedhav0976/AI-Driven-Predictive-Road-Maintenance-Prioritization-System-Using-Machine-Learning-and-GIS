@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 from PIL import ExifTags, Image
+from sqlalchemy import event
 
 from backend.assessment import extract_gps, road_geometry, score_detections, snap_to_road
 from backend.annotations import box_iou, render_annotations, suppress_duplicate_boxes
@@ -82,6 +83,12 @@ class ApiPipelineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             os.environ["DATABASE_URL"] = f"sqlite:///{(Path(directory) / 'test.sqlite3').as_posix()}"
             from backend import main
+            from backend.database import engine
+
+            def enable_foreign_keys(connection, _record):
+                connection.execute("PRAGMA foreign_keys=ON")
+
+            event.listen(engine, "connect", enable_foreign_keys)
 
             previous_upload, previous_annotated = main.UPLOAD_DIR, main.ANNOTATED_DIR
             main.UPLOAD_DIR = Path(directory) / "uploads"
@@ -195,8 +202,8 @@ class ApiPipelineTests(unittest.TestCase):
                         self.assertEqual(client.get("/api/detections").json()["total"], 0)
             finally:
                 main.UPLOAD_DIR, main.ANNOTATED_DIR = previous_upload, previous_annotated
-                from backend.database import engine
                 engine.dispose()
+                event.remove(engine, "connect", enable_foreign_keys)
 
 
 if __name__ == "__main__":
