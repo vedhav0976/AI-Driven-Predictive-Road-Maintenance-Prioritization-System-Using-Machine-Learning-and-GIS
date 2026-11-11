@@ -11,8 +11,11 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sess
 
 
 STORAGE_ROOT = Path(__file__).resolve().parent / "storage"
-DATABASE_URL = os.getenv(
-    "DATABASE_URL", f"sqlite:///{(STORAGE_ROOT / 'road_resilience.sqlite3').as_posix()}"
+DATABASE_URL = (
+    os.getenv("DATABASE_URL")
+    or os.getenv("POSTGRES_URL_NON_POOLING")
+    or os.getenv("POSTGRES_URL")
+    or f"sqlite:///{(STORAGE_ROOT / 'road_resilience.sqlite3').as_posix()}"
 )
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = "postgresql+psycopg://" + DATABASE_URL[len("postgres://"):]
@@ -118,6 +121,7 @@ class DamageDetection(Base):
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
+    **({"pool_size": 1, "max_overflow": 0} if not DATABASE_URL.startswith("sqlite:") else {}),
     connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite:") else {},
 )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)

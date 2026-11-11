@@ -138,23 +138,23 @@ When two detections cover nearly the same pixels (intersection over union at lea
 
 | Variable | Used by | Default |
 | --- | --- | --- |
-| `VITE_API_URL` | Frontend | `http://127.0.0.1:8000` in development; same-origin `/api` in production when unset |
+| `VITE_API_URL` | Frontend | `http://127.0.0.1:8000` in development; set to the separate API origin in production |
 | `ROAD_RESILIENCE_CORS` | Backend | `http://localhost:5173,http://127.0.0.1:5173` |
 | `ROAD_RESILIENCE_CONFIDENCE` | Backend | `0.25` |
 | `ROAD_RESILIENCE_IMAGE_SIZE` | Backend | `960` |
 | `ROAD_RESILIENCE_ROADS_FILE` | Backend | `data/osm_roads.geojson` when present, otherwise checked-in local GeoJSON |
-| `DATABASE_URL` | Backend | SQLite database under `backend/storage/` |
+| `DATABASE_URL` or `POSTGRES_URL_NON_POOLING` | Backend | SQLite database under `backend/storage/` when neither is set |
 
-### One Vercel project with frontend and backend services
+### Vercel dashboard and API on separate addresses
 
-The root `vercel.json` defines a Vite `frontend` service and a FastAPI `backend` service. Public `/api/*` and `/health` requests reach the backend; other paths reach the frontend. The browser calls the public same-origin API path, so no service-to-service binding is used. The backend service uses the repository root because its Python imports, checkpoint, and fallback road file are outside `backend/`. Vercel installs `backend/requirements.txt` for the backend service; that file pins CPU-only PyTorch wheels. The root `requirements.txt` includes it for local setup. `.python-version` pins Python 3.12 for Vercel.
+The dashboard is deployed as the `road-maintenance-ai` Vercel project at `https://road-maintenance-ai.vercel.app`, with Root Directory `frontend` and framework Vite. Its `frontend/vercel.json` serves client-side routes such as `/history`. The API is the `road-maintenance-api` project at `https://road-maintenance-api.vercel.app`, built from the repository root with the FastAPI service in the root `vercel.json`. The API needs the repository root for imports and `models/best.pt`; Vercel installs `backend/requirements.txt`, which pins CPU-only PyTorch and headless OpenCV. The root `requirements.txt` includes it for local setup.
 
-1. Push the repository, including `models/best.pt`, to GitHub. In Vercel, import it as **one project**, choose **Services** as the framework, and keep the project Root Directory at the repository root.
-2. In Vercel project Settings → Environment Variables, set `VERCEL_SUPPORT_LARGE_FUNCTIONS` to `1` and redeploy. The CPU-only PyTorch build is still larger than the standard 500 MB Python function limit; Vercel's Large Functions beta supports up to 5 GB. Provision a persistent PostgreSQL database and set `DATABASE_URL` in the project to its connection URL. Do not use the default SQLite file for hosted uploads: Vercel Functions have a read-only deployment filesystem and temporary scratch storage, so a local SQLite file cannot preserve analysis history.
-3. Deploy, check `/health` including `model.status`, then upload a geotagged image and verify it appears in History and the map. `VITE_API_URL` should be unset for this one-domain setup. `ROAD_RESILIENCE_CORS` is only needed if another website calls the API across origins.
-4. To bring existing local history online, set `DATABASE_URL` locally to the new database's external URL and run `python -m backend.migrate_sqlite_to_postgres` before hosted uploads. The command requires an empty destination database and copies the saved images and records.
+1. Connect both Vercel projects to this GitHub repository. Set the dashboard project Root Directory to `frontend` and framework to Vite; keep the API project at the repository root with the Services framework.
+2. Set dashboard `VITE_API_URL=https://road-maintenance-api.vercel.app` for Production and Preview. Vite embeds this public origin at build time. Set API `ROAD_RESILIENCE_CORS=https://road-maintenance-ai.vercel.app` and `VERCEL_SUPPORT_LARGE_FUNCTIONS=1` for Production and Preview.
+3. Connect a Supabase PostgreSQL resource to the API project. Its `POSTGRES_URL_NON_POOLING` is a session-pooler connection that works with SQLAlchemy and Psycopg. The API uses `DATABASE_URL` if explicitly set, then `POSTGRES_URL_NON_POOLING`, then `POSTGRES_URL`. Do not use the default SQLite file on Vercel because deployment storage is read-only.
+4. Check the API `/health` and `model.status`, then open the dashboard and verify History and images. The four pre-deployment analyses were copied from Neon to Supabase using `python -m backend.migrate_postgres_to_postgres`; that command needs Neon `DATABASE_URL` and prefixed Supabase `SUPABASE_POSTGRES_URL_NON_POOLING` in its environment and requires an empty destination database.
 
-PyTorch, Ultralytics, OpenCV, OCR, and the checkpoint make the backend a large Python function. Check Vercel's function package, memory, and duration limits for the chosen plan; a deployment build and live inference test are still needed. The local SQLite file and uploaded images are ignored by Git. Public image endpoints and upload APIs have no authentication, so restrict access before using sensitive imagery.
+PyTorch, Ultralytics, OpenCV, OCR, and the checkpoint make the backend a large Python function. A deployed build and public API health check passed; a live image inference request has not yet been tested. Vercel Functions limit request bodies to 4.5 MB, so larger image uploads need a direct-to-storage flow or another backend host. The local SQLite file and uploaded images are ignored by Git. Public image endpoints and upload APIs have no authentication, so restrict access before using sensitive imagery.
 
 ### Alternative: Vercel frontend + Render backend
 

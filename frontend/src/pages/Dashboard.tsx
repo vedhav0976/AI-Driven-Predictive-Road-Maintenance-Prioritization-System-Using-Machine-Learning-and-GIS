@@ -68,7 +68,7 @@ function Dashboard() {
       <span>{loading ? "Connecting to backend…" : error ? "Backend unavailable" : "Source: backend uploads and Mapillary files"}</span>
       <button className="panel-action" type="button" onClick={refresh} disabled={refreshing}><RefreshCw size={16} />{refreshing ? "Refreshing…" : "Refresh"}</button>
     </div>
-    {error && <div className="map-notice"><AlertTriangle size={18} /><span>Could not reach the dashboard API: {error}. Start the FastAPI backend on port 8000 or check VITE_API_URL.</span></div>}
+    {error && <div className="map-notice"><AlertTriangle size={18} /><span>Could not reach the dashboard API: {error}. Check the API address or try again later.</span></div>}
     {!data && !loading && <div className="empty-state"><ClipboardCheck size={28} /><h3>No backend data loaded</h3><p>The dashboard will show observations when the API is available.</p></div>}
     {data && <>
       <div className="map-notice"><ClipboardCheck size={18} /><span>{data.uploaded_images} uploaded image{data.uploaded_images === 1 ? "" : "s"} analyzed; {data.images_processed - data.uploaded_images} optional Mapillary metadata record{data.images_processed - data.uploaded_images === 1 ? "" : "s"} loaded. Road Map and Road Assessment show saved API results.{data.uploaded_images > 0 && data.detections === 0 ? " No road damage was detected in the saved analyses." : ""}</span></div>
