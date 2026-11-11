@@ -6,7 +6,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 from PIL import ExifTags, Image
@@ -176,6 +176,23 @@ class ApiPipelineTests(unittest.TestCase):
                     self.assertEqual(feature["properties"]["mpi_score"], 40)
                     self.assertEqual(feature["properties"]["priority"], "Medium")
                     self.assertEqual(len(client.get("/api/observations?priority=Medium").json()["records"]), 1)
+                    with patch.dict(os.environ, {"ROAD_RESILIENCE_DELETE_KEY": "test-delete-key"}):
+                        delete_url = f"/api/detections/{record.id}"
+                        self.assertEqual(client.delete(delete_url).status_code, 403)
+                        self.assertEqual(client.delete(delete_url, headers={"X-Delete-Key": "wrong"}).status_code, 403)
+                        authorized = {"X-Delete-Key": "test-delete-key"}
+                        self.assertEqual(client.delete(delete_url, headers=authorized).status_code, 200)
+                        self.assertEqual(client.get(delete_url).status_code, 404)
+                        self.assertEqual(len(client.get("/api/map").json()["features"]), 1)
+                        self.assertEqual(client.delete(delete_url, headers=authorized).status_code, 404)
+                        gps_url = f"/api/detections/{located.json()['id']}"
+                        self.assertEqual(client.delete(gps_url, headers=authorized).status_code, 200)
+                        self.assertEqual(client.get(gps_url + "/original").status_code, 404)
+                        self.assertEqual(client.get("/api/map").json()["features"], [])
+                        self.assertEqual(client.get("/api/dashboard/stats").json()["matched_observations"], 0)
+                        self.assertEqual(client.delete(f"/api/detections/{result['id']}", headers=authorized).status_code, 200)
+                        self.assertEqual(client.get("/api/dashboard/stats").json()["images_processed"], 0)
+                        self.assertEqual(client.get("/api/detections").json()["total"], 0)
             finally:
                 main.UPLOAD_DIR, main.ANNOTATED_DIR = previous_upload, previous_annotated
                 from backend.database import engine

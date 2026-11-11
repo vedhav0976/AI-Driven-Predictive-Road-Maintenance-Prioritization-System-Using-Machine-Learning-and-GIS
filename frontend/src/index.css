@@ -779,6 +779,87 @@ a {
   text-decoration: none;
 }
 
+.history-actions,
+.history-delete-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.history-delete-trigger {
+  padding: 9px 12px;
+  border: 1px solid #e7b6bd;
+  border-radius: 8px;
+  background: #fff7f7;
+  color: #a92d3a;
+  cursor: pointer;
+}
+
+.history-delete-panel {
+  margin-bottom: 18px;
+  padding: 20px 22px;
+  border-color: #e7b6bd;
+  background: #fffafa;
+}
+
+.history-delete-panel h2 {
+  margin: 0 0 8px;
+  color: #83202d;
+  font-size: 16px;
+}
+
+.history-delete-panel p {
+  margin: 0 0 16px;
+  color: #624c51;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.history-delete-panel form {
+  display: grid;
+  gap: 10px;
+  max-width: 380px;
+}
+
+.history-delete-panel label {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.history-delete-panel input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d2d9e2;
+  border-radius: 8px;
+  font: inherit;
+}
+
+.history-delete-actions button {
+  padding: 9px 12px;
+  border: 1px solid #d2d9e2;
+  border-radius: 8px;
+  background: white;
+  cursor: pointer;
+}
+
+.history-delete-actions .history-delete-confirm {
+  border-color: #a92d3a;
+  background: #a92d3a;
+  color: white;
+}
+
+.history-delete-actions button:disabled,
+.history-delete-trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.history-delete-panel .history-delete-error {
+  margin: 12px 0 0;
+  color: #a92d3a;
+}
+
 .history-detail-summary,
 .history-images {
   margin-bottom: 18px;

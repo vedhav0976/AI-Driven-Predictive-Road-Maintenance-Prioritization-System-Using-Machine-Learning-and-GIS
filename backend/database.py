@@ -6,7 +6,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, LargeBinary, String, Text, create_engine, func, inspect, select, text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, LargeBinary, String, Text, create_engine, delete, func, inspect, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 
@@ -188,6 +188,27 @@ def refresh_road_segment(session: Session, segment_id: str | None) -> None:
     segment.pci_score = score["pci_proxy"]
     segment.mpi_score = score["mpi_proxy"]
     segment.priority_tier = score["priority"]
+
+
+def delete_analysis(session: Session, record_id: int) -> str | None:
+    """Remove one analysis, both saved images, and its normalized assessment rows."""
+    record = session.get(DetectionRecord, record_id)
+    if record is None:
+        return None
+    observation = session.scalar(select(Observation).where(Observation.legacy_record_id == record_id))
+    segment_id = observation.segment_id if observation else record.road_id
+    if observation is not None:
+        session.execute(delete(DamageDetection).where(DamageDetection.observation_id == observation.id))
+        session.delete(observation)
+        session.flush()
+    asset = session.get(ImageAsset, record_id)
+    if asset is not None:
+        session.delete(asset)
+    filename = record.original_filename
+    session.delete(record)
+    session.flush()
+    refresh_road_segment(session, segment_id)
+    return filename
 
 
 def persist_observation(session: Session, record: DetectionRecord, geometry_geojson: str | None) -> Observation:

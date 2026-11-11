@@ -116,6 +116,7 @@ The backend reads these local files; it does not fetch images from the live Mapi
 | GET | `/api/dashboard` | Counts and history from saved uploads and optional Mapillary files |
 | GET | `/api/detections` | Paginated saved upload history (`limit`, `offset`, optional filename `query`); includes total count |
 | GET | `/api/detections/{record_id}` | One saved upload result |
+| DELETE | `/api/detections/{record_id}` | Delete one saved analysis and its images; requires `X-Delete-Key` |
 | GET | `/api/detections/{record_id}/image` | Saved annotated JPEG |
 | GET | `/api/detections/{record_id}/original` | Saved original image |
 | GET | `/api/mapillary` | Saved image metadata with associated detections |
@@ -143,6 +144,7 @@ When two detections cover nearly the same pixels (intersection over union at lea
 | `ROAD_RESILIENCE_CONFIDENCE` | Backend | `0.25` |
 | `ROAD_RESILIENCE_IMAGE_SIZE` | Backend | `960` |
 | `ROAD_RESILIENCE_ROADS_FILE` | Backend | `data/osm_roads.geojson` when present, otherwise checked-in local GeoJSON |
+| `ROAD_RESILIENCE_DELETE_KEY` | Backend | Unset; deletion is disabled until a secret key is configured |
 | `DATABASE_URL` or `POSTGRES_URL_NON_POOLING` | Backend | SQLite database under `backend/storage/` when neither is set |
 
 ### Vercel dashboard and API on separate addresses
@@ -153,6 +155,8 @@ The dashboard is deployed as the `road-maintenance-ai` Vercel project at `https:
 2. Set dashboard `VITE_API_URL=https://road-maintenance-api.vercel.app` for Production and Preview. Vite embeds this public origin at build time. Set API `ROAD_RESILIENCE_CORS=https://road-maintenance-ai.vercel.app` and `VERCEL_SUPPORT_LARGE_FUNCTIONS=1` for Production and Preview.
 3. Connect a Supabase PostgreSQL resource to the API project. Its `POSTGRES_URL_NON_POOLING` is a session-pooler connection that works with SQLAlchemy and Psycopg. The API uses `DATABASE_URL` if explicitly set, then `POSTGRES_URL_NON_POOLING`, then `POSTGRES_URL`. Do not use the default SQLite file on Vercel because deployment storage is read-only.
 4. Check the API `/health` and `model.status`, then open the dashboard and verify History and images. The four pre-deployment analyses were copied from Neon to Supabase using `python -m backend.migrate_postgres_to_postgres`; that command needs Neon `DATABASE_URL` and prefixed Supabase `SUPABASE_POSTGRES_URL_NON_POOLING` in its environment and requires an empty destination database.
+
+To delete a saved analysis, open it from **History**, choose **Delete analysis**, enter the deletion key, and confirm. This removes the analysis, original and annotated image bytes, and its road observation from the active database; the affected road segment score is recalculated. Configure `ROAD_RESILIENCE_DELETE_KEY` as a secret environment variable on the API project, then redeploy the API. Keep the key out of Git and share it only with administrators. Deletion does not remove records from separately retained database backups.
 
 PyTorch, Ultralytics, OpenCV, OCR, and the checkpoint make the backend a large Python function. A deployed build and public API health check passed; a live image inference request has not yet been tested. Vercel Functions limit request bodies to 4.5 MB, so larger image uploads need a direct-to-storage flow or another backend host. The local SQLite file and uploaded images are ignored by Git. Public image endpoints and upload APIs have no authentication, so restrict access before using sensitive imagery.
 

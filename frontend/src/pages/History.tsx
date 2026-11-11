@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, ChevronLeft, ChevronRight, History as HistoryIcon, Search } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { ArrowLeft, ChevronLeft, ChevronRight, History as HistoryIcon, Search, Trash2 } from "lucide-react";
 import { API_BASE, apiFetch } from "../api";
 import type { SavedAnalysisDetail, SavedAnalysisSummary } from "../api";
 
@@ -62,8 +62,13 @@ function HistoryList() {
 }
 
 function HistoryDetail({ recordId }: { recordId: string }) {
+  const navigate = useNavigate();
   const [record, setRecord] = useState<SavedAnalysisDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteKey, setDeleteKey] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -73,11 +78,30 @@ function HistoryDetail({ recordId }: { recordId: string }) {
     return () => { active = false; };
   }, [recordId]);
 
+  const removeAnalysis = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!record || !deleteKey.trim() || deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await apiFetch<{ deleted_id: number }>(`/api/detections/${record.id}`, {
+        method: "DELETE",
+        headers: { "X-Delete-Key": deleteKey.trim() },
+      });
+      navigate("/history", { replace: true });
+    } catch (reason) {
+      setDeleteError(reason instanceof Error ? reason.message : "Could not delete this analysis.");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return <div className="content-page">
-    <section className="section-heading"><div><p className="eyebrow">SAVED RESULT</p><h1>Previous analysis</h1><p>Review the stored result without running the model again.</p></div><Link className="panel-action history-back" to="/history"><ArrowLeft size={16} />All analyses</Link></section>
+    <section className="section-heading"><div><p className="eyebrow">SAVED RESULT</p><h1>Previous analysis</h1><p>Review the stored result without running the model again.</p></div><div className="history-actions"><Link className="panel-action history-back" to="/history"><ArrowLeft size={16} />All analyses</Link>{record && <button className="panel-action history-delete-trigger" type="button" onClick={() => { setConfirmingDelete(true); setDeleteError(null); }} disabled={deleting}><Trash2 size={15} />Delete analysis</button>}</div></section>
     {error && <div className="history-message" role="alert">Could not load analysis: {error}</div>}
     {!record && !error && <div className="history-message">Loading analysis…</div>}
     {record && <>
+      {confirmingDelete && <section className="panel history-delete-panel" aria-label="Confirm deletion"><h2>Delete this analysis?</h2><p>This permanently removes the result, original and annotated images, and its road assessment from the live database.</p><form onSubmit={removeAnalysis}><label htmlFor="delete-key">Deletion key</label><input id="delete-key" type="password" autoComplete="off" value={deleteKey} onChange={(event) => setDeleteKey(event.target.value)} required disabled={deleting} /><div className="history-delete-actions"><button type="button" onClick={() => { setConfirmingDelete(false); setDeleteKey(""); setDeleteError(null); }} disabled={deleting}>Cancel</button><button className="history-delete-confirm" type="submit" disabled={deleting || !deleteKey.trim()}>{deleting ? "Deleting…" : "Permanently delete"}</button></div></form>{deleteError && <p className="history-delete-error" role="alert">{deleteError}</p>}</section>}
       <section className="panel history-detail-summary"><div className="panel-header"><div><p className="panel-kicker">ANALYSIS #{record.id}</p><h2>{record.filename}</h2></div>{record.priority ? <span className={`priority-pill ${record.priority.toLowerCase()}`}>{record.priority}</span> : <span className="muted-text">Unassessed</span>}</div>
         <div className="history-facts"><div><span>Analyzed</span><strong>{dateLabel(record.created_at)}</strong></div><div><span>Detections</span><strong>{record.detection_count}</strong></div><div><span>Location</span><strong>{locationLabel(record)}</strong></div><div><span>Road segment</span><strong>{record.road_name ?? record.road_id ?? (record.latitude == null ? "No GPS" : "Outside local coverage")}</strong></div><div><span>PCI proxy</span><strong>{record.pci_proxy?.toFixed(1) ?? "Unassessed"}</strong></div><div><span>MPI proxy</span><strong>{record.mpi_proxy?.toFixed(1) ?? "Unassessed"}</strong></div></div>
       </section>

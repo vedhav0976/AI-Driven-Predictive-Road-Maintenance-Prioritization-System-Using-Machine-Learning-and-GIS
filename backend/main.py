@@ -7,13 +7,14 @@ import io
 import json
 import logging
 import os
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -26,7 +27,7 @@ from backend.annotations import render_annotations, suppress_duplicate_boxes
 from backend.geotag import extract_image_location
 from backend.database import (
     DamageDetection, DetectionRecord, ImageAsset, Observation, RoadSegment, get_session,
-    initialize_database, persist_observation, refresh_road_segment, relocate_observation,
+    delete_analysis, initialize_database, persist_observation, refresh_road_segment, relocate_observation,
 )
 
 
@@ -833,6 +834,21 @@ def get_detection(record_id: int) -> dict[str, Any]:
             "pci_proxy": record.pci_proxy, "mpi_proxy": record.mpi_proxy,
             "priority": record.priority, "scoring_basis": record.scoring_basis,
         }
+
+
+@app.delete("/api/detections/{record_id}")
+def delete_detection(record_id: int, x_delete_key: str | None = Header(default=None)) -> dict[str, Any]:
+    configured_key = os.getenv("ROAD_RESILIENCE_DELETE_KEY")
+    if not configured_key:
+        raise HTTPException(status_code=503, detail="Analysis deletion is not configured.")
+    if not x_delete_key or not secrets.compare_digest(x_delete_key, configured_key):
+        raise HTTPException(status_code=403, detail="Invalid deletion key.")
+    with get_session() as session:
+        filename = delete_analysis(session, record_id)
+        if filename is None:
+            raise HTTPException(status_code=404, detail="Detection record not found.")
+        session.commit()
+    return {"deleted_id": record_id, "filename": filename}
 
 
 @app.get("/api/detections/{record_id}/image")
