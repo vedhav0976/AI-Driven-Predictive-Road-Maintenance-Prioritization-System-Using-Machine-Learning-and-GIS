@@ -1,0 +1,13 @@
+.git/
+.venv/
+.venv_short/
+.vercel/
+.env*
+backend/storage/
+frontend/node_modules/
+frontend/dist/
+frontend/runs/
+data/
+results/
+**/__pycache__/
+**/*.pyc

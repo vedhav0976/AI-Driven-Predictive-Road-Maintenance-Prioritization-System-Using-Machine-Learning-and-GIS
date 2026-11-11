@@ -7,3 +7,6 @@ __pycache__/
 .venv/
 .venv_short/
 data/osm_roads.geojson
+
+.vercel
+.env*
