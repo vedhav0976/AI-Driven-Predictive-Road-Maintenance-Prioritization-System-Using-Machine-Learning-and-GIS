@@ -11,9 +11,12 @@ import {
   Menu,
   Settings as SettingsIcon,
   X,
+  Route as RouteIcon,
+  Plus,
+  ArrowUpRight,
 } from "lucide-react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Suspense, useEffect, useRef, useState } from "react";
 
 const navigation = [
   {
@@ -63,8 +66,41 @@ const secondaryNavigation = [
 
 function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 900px)").matches);
+  const navigationRef = useRef<HTMLElement>(null);
+  const menuRef = useRef<HTMLButtonElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const location = useLocation();
   const navigate = useNavigate();
+
+  useEffect(() => { window.scrollTo({ top: 0 }); }, [location.pathname]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 900px)");
+    const onChange = (event: MediaQueryListEvent) => { setIsMobile(event.matches); if (!event.matches) setMobileOpen(false); };
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const menuButton = menuRef.current;
+    closeRef.current?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileOpen(false);
+      if (event.key !== "Tab") return;
+      const controls = navigationRef.current?.querySelectorAll<HTMLElement>("a[href], button:not([disabled])");
+      if (!controls?.length) return;
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", onKey);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = previousOverflow; if (menuButton?.offsetParent != null) menuButton.focus(); };
+  }, [mobileOpen]);
 
   const currentPage =
     [...navigation, ...secondaryNavigation].find(
@@ -77,24 +113,31 @@ function AppLayout() {
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#workspace-content">Skip to content</a>
       {mobileOpen && (
-        <div
+        <button
           className="mobile-overlay"
+          type="button"
+          aria-label="Close navigation"
+          tabIndex={-1}
           onClick={() => setMobileOpen(false)}
         />
       )}
 
-      <aside className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
+      <aside ref={navigationRef} id="workspace-navigation" className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`} aria-label="Workspace navigation" inert={isMobile && !mobileOpen} role={isMobile && mobileOpen ? "dialog" : undefined} aria-modal={isMobile && mobileOpen ? true : undefined}>
         <div className="sidebar-brand">
-          <div className="sidebar-logo">RR</div>
+          <div className="sidebar-logo"><RouteIcon size={23} strokeWidth={2} /></div>
 
           <div>
-            <strong>ROAD</strong>
-            <strong>RESILIENCE</strong>
+            <strong>Road Resilience</strong>
+            <span>Infrastructure intelligence</span>
           </div>
 
           <button
             className="sidebar-close"
+            ref={closeRef}
+            type="button"
+            aria-label="Close navigation"
             onClick={() => setMobileOpen(false)}
           >
             <X size={20} />
@@ -102,10 +145,10 @@ function AppLayout() {
         </div>
 
         <div className="sidebar-section-label">
-          ENGINEERING
+          WORKSPACE
         </div>
 
-        <nav className="sidebar-nav">
+        <nav className="sidebar-nav" aria-label="Main navigation">
           {navigation.map((item) => {
             const Icon = item.icon;
 
@@ -134,7 +177,7 @@ function AppLayout() {
           SYSTEM
         </div>
 
-        <nav className="sidebar-nav">
+        <nav className="sidebar-nav" aria-label="Project navigation">
           {secondaryNavigation.map((item) => {
             const Icon = item.icon;
 
@@ -160,44 +203,54 @@ function AppLayout() {
         </nav>
 
         <div className="sidebar-bottom">
+          <Link className="sidebar-project-card" to="/project-overview" onClick={() => setMobileOpen(false)}><span className="sidebar-project-icon"><RouteIcon size={19} /></span><strong>Better roads start here.</strong><span>Turn road imagery into actionable assessments.</span><span className="sidebar-project-link">About the project <ArrowUpRight size={14} /></span></Link>
           <button className="logout-button" onClick={handleLogout}>
             <LogOut size={18} />
-            Sign out
+            Leave workspace
           </button>
         </div>
       </aside>
 
-      <main className="main-content">
+      <div className="main-content">
         <header className="topbar">
           <div className="topbar-left">
             <button
               className="mobile-menu"
+              ref={menuRef}
+              type="button"
+              aria-label="Open navigation"
+              aria-expanded={mobileOpen}
+              aria-controls="workspace-navigation"
               onClick={() => setMobileOpen(true)}
             >
               <Menu size={22} />
             </button>
 
             <div className="breadcrumb">
-              <span>Engineer Portal</span>
+              <span>Workspace</span>
               <ChevronRight size={15} />
               <strong>{currentPage}</strong>
             </div>
           </div>
 
+          <div className="topbar-actions">
+          <Link className="topbar-create" to="/ai-analysis"><Plus size={16} /><span>New analysis</span></Link>
           <div className="engineer-profile">
-            <div className="engineer-avatar">VE</div>
+            <div className="engineer-avatar">EN</div>
 
             <div>
               <strong>Engineer</strong>
-              <span>Road Infrastructure</span>
+              <span>Engineering workspace</span>
             </div>
+          </div>
           </div>
         </header>
 
-        <div className="page-content">
-          <Outlet />
-        </div>
-      </main>
+        <main className="page-content" id="workspace-content" tabIndex={-1}>
+          <Suspense fallback={<div className="loading-state" role="status"><span className="loading-spinner" />Loading workspace…</div>}><Outlet /></Suspense>
+        </main>
+        <footer className="workspace-footer"><span><RouteIcon size={14} />Road Resilience</span><span>AI assisted assessments · Review before planning maintenance</span></footer>
+      </div>
     </div>
   );
 }

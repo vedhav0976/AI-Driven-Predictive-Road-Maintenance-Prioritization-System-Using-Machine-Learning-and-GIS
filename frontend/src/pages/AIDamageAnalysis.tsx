@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, BrainCircuit, CheckCircle2, Upload } from "lucide-react";
+import { AlertTriangle, ArrowRight, BrainCircuit, CheckCircle2, ImagePlus, Images, MapPin, Upload, X } from "lucide-react";
 import { API_BASE, apiFetch, sampleUrl } from "../api";
 import type { Detection, ModelInfo } from "../api";
+import "./AnalysisWorkspace.css";
 
 type AnalysisResult = {
   id: number;
@@ -77,6 +78,9 @@ function AIDamageAnalysis() {
   const bulkPreviewUrls = useRef<Set<string>>(new Set());
   const filesInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
+  const singleInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
 
   useEffect(() => {
     const urls = bulkPreviewUrls.current;
@@ -93,15 +97,20 @@ function AIDamageAnalysis() {
         setSamples(sampleData.samples);
         setSamplesLoaded(true);
       })
-      .catch(() => { setSamplesLoaded(true); setError("The analysis service is unavailable. Start the backend to load the model and samples."); });
+      .catch(() => { setSamplesLoaded(true); setError("The analysis service could not be reached. Please try again shortly."); });
   }, []);
 
   const chooseFile = (file: File) => {
-    if (!file.type.startsWith("image/")) {
+    if (!imageContentType(file)) {
       setError("Please choose an image file.");
       return;
     }
-    setSelectedFile(file);
+    if (file.size > MAX_IMAGE_BYTES) {
+      setError("Choose an image smaller than 15 MB.");
+      return;
+    }
+    const imageFile = file.type.startsWith("image/") ? file : new File([file], file.name, { type: imageContentType(file)! });
+    setSelectedFile(imageFile);
     setPreview(URL.createObjectURL(file));
     setResult(null);
     setError(null);
@@ -110,6 +119,7 @@ function AIDamageAnalysis() {
   const handleFile = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) chooseFile(file);
+    event.target.value = "";
   };
 
   const chooseSample = async (filename: string) => {
@@ -222,7 +232,7 @@ function AIDamageAnalysis() {
 
   const processBulk = async () => {
     const pending = bulkQueue.filter((item) => item.status === "queued");
-    if (!pending.length || bulkRunRef.current || busy) return;
+    if (!pending.length || bulkRunRef.current || busy || addingDrive) return;
     bulkRunRef.current = true;
     stopBulkRef.current = false;
     setStopAfterCurrent(false);
@@ -258,6 +268,8 @@ function AIDamageAnalysis() {
 
   const bulkFinished = bulkQueue.filter((item) => item.status === "complete" || item.status === "failed").length;
   const bulkPending = bulkQueue.some((item) => item.status === "queued");
+  const completeCount = bulkQueue.filter((item) => item.status === "complete").length;
+  const failedCount = bulkQueue.filter((item) => item.status === "failed").length;
 
   return (
     <div className="content-page">
@@ -265,19 +277,21 @@ function AIDamageAnalysis() {
         <div>
           <p className="eyebrow">COMPUTER VISION</p>
           <h1>AI damage analysis</h1>
-          <p>Run inference against the configured road-damage checkpoint.</p>
+          <p>Upload road imagery, detect visible damage, and save every assessment.</p>
         </div>
         <div className="model-chip"><BrainCircuit size={17} /> {model?.name ?? "YOLO model"}</div>
       </section>
 
-      {error && <div className="map-notice"><AlertTriangle size={18} /><span>{error}</span></div>}
+      {error && <div className="map-notice analysis-alert" role="alert"><AlertTriangle size={18} /><span>{error}</span></div>}
 
       <section className="ai-summary-grid">
-        <div className="ai-summary-card"><span>MODEL</span><strong>{model?.status === "ready" ? "Ready" : error ? "Unavailable" : "Loading"}</strong><p>{model?.checkpoint ?? "Start the backend to enable inference"}</p></div>
+        <div className="ai-summary-card"><span>MODEL</span><strong>{model?.status === "ready" ? "Ready" : error ? "Unavailable" : "Loading"}</strong><p>{model?.name ?? "Connecting to the analysis service"}</p></div>
         <div className="ai-summary-card"><span>THRESHOLD</span><strong>{model ? `${Math.round(model.confidence_threshold * 100)}%` : "—"}</strong><p>Configured inference confidence</p></div>
         <div className="ai-summary-card"><span>CLASSES</span><strong>{model ? Object.keys(model.class_names).length : "—"}</strong><p>Verified RDD2022 class mapping</p></div>
-        <div className="ai-summary-card"><span>STATUS</span><strong>{result ? "Complete" : "Ready"}</strong><p>Results are never fabricated</p></div>
+        <div className="ai-summary-card"><span>WORKSPACE</span><strong>{busy || bulkBusy ? "Analyzing" : result || completeCount ? "Results saved" : "Ready to start"}</strong><p>{bulkBusy ? "Processing one image at a time" : "Saved results stay in History"}</p></div>
       </section>
+
+      <div className="analysis-workflow" aria-label="Analysis workflow"><span><b>01</b>Add road images</span><ArrowRight size={16} /><span><b>02</b>Run AI analysis</span><ArrowRight size={16} /><span><b>03</b>Review & prioritize</span></div>
 
       <div className="analysis-mode-toggle" role="group" aria-label="Upload mode">
         <button type="button" className={mode === "single" ? "active" : ""} aria-pressed={mode === "single"} disabled={busy || bulkBusy} onClick={() => setMode("single")}>Single upload</button>
@@ -285,19 +299,19 @@ function AIDamageAnalysis() {
       </div>
 
       {mode === "single" && <section className="panel">
-        <div className="panel-header"><div><p className="panel-kicker">INFERENCE WORKSPACE</p><h2>Upload a road image</h2></div></div>
+        <div className="panel-header"><div><p className="panel-kicker">SINGLE IMAGE</p><h2>Start with a road photo</h2></div><span className="analysis-format-chip">Images up to 15 MB</span></div>
+        <input ref={singleInput} type="file" accept="image/*" onChange={handleFile} disabled={busy || bulkBusy} hidden />
+        <button className={`analysis-dropzone ${selectedFile ? "has-file" : ""}`} type="button" onClick={() => singleInput.current?.click()} disabled={busy || bulkBusy} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (!busy && !bulkBusy && event.dataTransfer.files[0]) chooseFile(event.dataTransfer.files[0]); }}>
+          <span className="analysis-dropzone-icon">{selectedFile ? <CheckCircle2 size={26} /> : <ImagePlus size={26} />}</span><strong>{selectedFile ? selectedFile.name : "Choose an image or drop it here"}</strong><span>{selectedFile ? `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB · Click to replace image` : "Original road photos work best. JPEG, PNG, WebP, and more."}</span>
+        </button>
         <div className="analysis-controls">
-          <label className="analysis-upload-button">
-            <Upload size={18} /><span>Choose image</span>
-            <input type="file" accept="image/*" onChange={handleFile} disabled={busy || bulkBusy} hidden />
-          </label>
           {samples.length > 0 && (
             <select aria-label="Use a project sample" onChange={(event) => event.target.value && chooseSample(event.target.value)} defaultValue="" disabled={busy || bulkBusy}>
               <option value="">Use a project sample</option>
               {samples.slice(0, 10).map((sample) => <option key={sample.filename} value={sample.filename}>{sample.filename}</option>)}
             </select>
           )}
-          {samples.length === 0 && <span className="muted-text">{error ? "Project samples unavailable" : samplesLoaded ? "No project samples installed; choose an image from your computer" : "Loading project samples…"}</span>}
+          {samples.length === 0 && <span className="analysis-upload-note"><MapPin size={17} />{samplesLoaded ? "GPS is extracted automatically when available." : "Loading image options…"}</span>}
           <button
             className="analysis-run-button"
             type="button"
@@ -305,15 +319,14 @@ function AIDamageAnalysis() {
             disabled={busy || bulkBusy || !selectedFile}
           >
             <BrainCircuit size={18} />
-            {busy ? "Running AI analysis…" : "Run AI Analysis"}
+            {busy ? "Analyzing image…" : "Run analysis"}
           </button>
         </div>
-        <p className="muted-text">GPS is read automatically from image metadata or a visible coordinate stamp.</p>
       </section>}
 
       {mode === "bulk" && <section className="panel">
-        <div className="panel-header"><div><p className="panel-kicker">BULK INFERENCE</p><h2>Process multiple road images</h2></div></div>
-        <p className="muted-text">Add images from your device or a public Google Drive link. The same queue processes every image one at a time.</p>
+        <div className="panel-header"><div><p className="panel-kicker">BULK ANALYSIS</p><h2>Build your image queue</h2></div><span className="analysis-format-chip">One image at a time</span></div>
+        <p className="analysis-panel-description">Choose a source and add images to the same queue. Each completed result is saved to History.</p>
         <div className="analysis-controls">
           <select aria-label="Image source" value={bulkSource} onChange={(event) => setBulkSource(event.target.value as "files" | "folder" | "drive")} disabled={busy || bulkBusy || addingDrive}>
             <option value="files">Images on device</option><option value="folder">Folder on device</option><option value="drive">Google Drive link</option>
@@ -324,15 +337,16 @@ function AIDamageAnalysis() {
           <button className="analysis-upload-button" type="button" onClick={() => bulkSource === "drive" ? void addDriveLink() : (bulkSource === "folder" ? folderInput : filesInput).current?.click()} disabled={busy || bulkBusy || addingDrive || (bulkSource === "drive" && !driveLink.trim())}>
             <Upload size={18} />{addingDrive ? "Adding…" : "Add to queue"}
           </button>
-          <button className="analysis-run-button" type="button" onClick={processBulk} disabled={busy || bulkBusy || !bulkPending}>
-            <BrainCircuit size={18} />{bulkBusy ? "Processing queue…" : bulkFinished ? "Process remaining" : "Run Bulk Analysis"}
+          <button className="analysis-run-button" type="button" onClick={processBulk} disabled={busy || bulkBusy || addingDrive || !bulkPending}>
+            <BrainCircuit size={18} />{bulkBusy ? "Processing queue…" : bulkFinished ? "Process remaining" : "Run analysis"}
           </button>
           {bulkBusy && <button className="panel-action" type="button" onClick={() => { stopBulkRef.current = true; setStopAfterCurrent(true); }} disabled={stopAfterCurrent}>{stopAfterCurrent ? "Stopping after current image…" : "Stop after current image"}</button>}
         </div>
-        {bulkSource === "drive" && <p className="bulk-notice">Share the Drive image or folder as “Anyone with the link.” Folder import requires the server's Google Drive API key.</p>}
+        {bulkSource === "drive" && <p className="bulk-notice">Use an image or folder shared as “Anyone with the link.” Folder imports must be enabled by your administrator.</p>}
         {bulkNotice && <p className="bulk-notice" role="status">{bulkNotice}</p>}
+        {bulkQueue.length === 0 && <div className="analysis-queue-empty"><Images size={30} /><h3>Your queue is ready for images</h3><p>Add local images, a folder, or a shared Drive link. You can combine sources before running analysis.</p></div>}
         {bulkQueue.length > 0 && <>
-          <div className="bulk-queue-heading"><div><strong>Processing queue</strong><span>{bulkQueue.length} image{bulkQueue.length === 1 ? "" : "s"} · {bulkFinished} finished{bulkBusy ? " · processing one image at a time" : ""}</span></div><button className="panel-action" type="button" onClick={clearBulkQueue} disabled={bulkBusy}>Clear queue</button></div>
+          <div className="bulk-queue-heading"><div><strong>Processing queue <span className="queue-total">{bulkQueue.length}</span></strong><span>{completeCount} complete · {failedCount} failed · {bulkQueue.length - bulkFinished} remaining</span></div><button className="panel-action" type="button" onClick={clearBulkQueue} disabled={bulkBusy || addingDrive}>Clear queue</button></div>
           <progress className="bulk-progress" value={bulkFinished} max={bulkQueue.length} aria-label="Bulk analysis progress" />
           <ol className="bulk-results">
             {bulkQueue.map((item) => <li key={item.id} className="bulk-result-row">
@@ -340,7 +354,7 @@ function AIDamageAnalysis() {
                 {item.previewUrl ? <img src={item.previewUrl} alt={`Original ${item.displayName}`} loading="lazy" /> : <span className="drive-queue-icon">Drive</span>}
                 <div className="bulk-row-name"><strong>{item.displayName}</strong><span>{item.file ? `${(item.file.size / 1024 / 1024).toFixed(2)} MB` : "Google Drive"}</span></div>
                 <span className={`bulk-status ${item.status}`}>{item.status}</span>
-                <button className="panel-action" type="button" onClick={() => removeBulkItem(item)} disabled={bulkBusy} aria-label={`Remove ${item.displayName} from queue`}>Remove</button>
+                <button className="panel-action queue-remove" type="button" onClick={() => removeBulkItem(item)} disabled={bulkBusy || addingDrive} aria-label={`Remove ${item.displayName} from queue`}><X size={16} /></button>
               </div>
               {item.status === "processing" && <p className="bulk-row-message">Running model inference…</p>}
               {item.error && <p className="bulk-error bulk-row-message">{item.error}</p>}

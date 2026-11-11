@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CircleMarker, MapContainer, Polyline, Popup, TileLayer, useMap } from "react-leaflet";
 import { latLngBounds } from "leaflet";
-import { AlertTriangle, MapPinned } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, MapPinned } from "lucide-react";
+import { Link } from "react-router-dom";
 import "leaflet/dist/leaflet.css";
 import { apiFetch, type InspectionObservation, type PriorityMap } from "../api";
 
@@ -9,8 +10,13 @@ type Coordinate = [number, number];
 
 function FitToResults({ coordinates }: { coordinates: Coordinate[] }) {
   const map = useMap();
+  const previousBounds = useRef("");
   useEffect(() => {
-    if (coordinates.length) map.fitBounds(latLngBounds(coordinates), { padding: [25, 25], maxZoom: 15 });
+    const signature = JSON.stringify(coordinates);
+    if (coordinates.length && signature !== previousBounds.current) {
+      map.fitBounds(latLngBounds(coordinates), { padding: [35, 35], maxZoom: 15 });
+      previousBounds.current = signature;
+    }
   }, [coordinates, map]);
   return null;
 }
@@ -19,6 +25,7 @@ function RoadMap() {
   const [layer, setLayer] = useState<PriorityMap | null>(null);
   const [observations, setObservations] = useState<InspectionObservation[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
@@ -27,28 +34,31 @@ function RoadMap() {
       apiFetch<{ records: InspectionObservation[] }>("/api/observations?limit=200"),
     ]).then(([mapData, queue]) => {
       if (active) { setLayer(mapData); setObservations(queue.records); setError(null); }
-    }).catch((reason: Error) => { if (active) setError(reason.message); });
+    }).catch((reason: Error) => { if (active) setError(reason.message); })
+      .finally(() => { if (active) setLoading(false); });
     void load();
     const timer = window.setInterval(() => void load(), 30_000);
     return () => { active = false; window.clearInterval(timer); };
   }, []);
 
+  const locatedObservations = useMemo(() => observations.filter((item) => item.latitude != null && item.longitude != null), [observations]);
   const coordinates = useMemo(() => [
     ...(layer?.features.flatMap((feature) => feature.geometry.coordinates.map(([lon, lat]): Coordinate => [lat, lon])) ?? []),
-    ...observations.filter((item) => item.latitude != null && item.longitude != null)
-      .map((item): Coordinate => [item.latitude!, item.longitude!]),
-  ], [layer, observations]);
+    ...locatedObservations.map((item): Coordinate => [item.latitude!, item.longitude!]),
+  ], [layer, locatedObservations]);
   const matched = layer?.features.filter((feature) => feature.properties.priority).length ?? 0;
 
   return <div className="content-page">
-    <section className="section-heading"><div><p className="eyebrow">GIS WORKSPACE</p><h1>Bengaluru road map</h1><p>Saved GPS observations and scored local road segments. The layer refreshes every 30 seconds.</p></div><div className="map-location"><MapPinned size={17} /> Bengaluru, India</div></section>
-    {error && <div className="map-notice"><AlertTriangle size={18} /><span>Map API unavailable: {error}</span></div>}
-    {!error && <div className="map-notice"><MapPinned size={18} /><span>{matched ? `${matched} scored road segments` : "No scored road segments yet"}; {observations.filter((item) => item.geolocated).length} recent located uploads. GPS from EXIF or a visible image stamp appears as a point; road scoring requires a match within 30 m of the configured geometry.</span></div>}
-    <section className="full-map-panel"><MapContainer center={[12.9716, 77.5946]} zoom={11} scrollWheelZoom className="leaflet-map"><TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" /><FitToResults coordinates={coordinates} />
+    <section className="section-heading"><div><p className="eyebrow">SPATIAL INTELLIGENCE</p><h1>Road condition map</h1><p>See where damage was observed and explore maintenance priorities by road.</p></div><div className="page-actions"><Link className="button-secondary" to="/road-assessment">Review assessments<ArrowUpRight size={16} /></Link><Link className="button-primary" to="/ai-analysis">Add an analysis<ArrowUpRight size={16} /></Link></div></section>
+    {error && <div className="map-notice" role="alert"><AlertTriangle size={18} /><span>We could not refresh the map data. {error}{layer ? " The last loaded observations are still visible." : ""}</span></div>}
+    <div className="map-summary-bar"><span className="map-location"><MapPinned size={17} />Bengaluru road coverage</span><span><strong>{matched}</strong> scored road segments</span><span><strong>{locatedObservations.length}</strong> located images</span><span className="status-badge ready">{loading ? "Loading map data…" : "Updates every 30 seconds"}</span></div>
+    <section className="full-map-panel" aria-label="Road observations map"><MapContainer center={[12.9716, 77.5946]} zoom={11} scrollWheelZoom className="leaflet-map"><TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" /><FitToResults coordinates={coordinates} />
       {layer?.features.map((feature) => <Polyline key={feature.id} positions={feature.geometry.coordinates.map(([lon, lat]): Coordinate => [lat, lon])} pathOptions={{ color: feature.properties.color, weight: 6, opacity: 0.85 }}><Popup><strong>{feature.properties.road_name ?? feature.id}</strong><br />Segment: {feature.id}<br />Road class: {feature.properties.road_type ?? "Unknown"}<br />PCI proxy: {feature.properties.pci_score?.toFixed(1) ?? "Unassessed"}<br />MPI proxy: {feature.properties.mpi_score?.toFixed(1) ?? "Unassessed"}<br />Priority: {feature.properties.priority ?? "Unassessed"}</Popup></Polyline>)}
-      {observations.filter((item) => item.latitude != null && item.longitude != null).map((item) => <CircleMarker key={item.id} center={[item.latitude!, item.longitude!]} radius={5} pathOptions={{ color: "#1d4ed8", fillColor: "#1d4ed8", fillOpacity: 0.8 }}><Popup><strong>{item.filename}</strong><br />{item.damage_types.join(", ") || "No scored damage"}<br />Location: {item.latitude?.toFixed(6)}, {item.longitude?.toFixed(6)} ({item.location_source === "image_overlay" ? "image overlay" : item.location_source === "manual" ? "entered" : "EXIF"})<br />Image priority proxy: {item.priority ?? "Unassessed"}<br />{item.road_id ? `Matched: ${item.road_id}` : "Outside available road geometry"}</Popup></CircleMarker>)}
+      {locatedObservations.map((item) => <CircleMarker key={item.id} center={[item.latitude!, item.longitude!]} radius={6} pathOptions={{ color: "#347ca4", fillColor: "#347ca4", fillOpacity: 0.85, weight: 2 }}><Popup><strong>{item.filename}</strong><br />{item.damage_types.map((value) => value.replace(/^D\d+_/, "").replaceAll("_", " ")).join(", ") || "No scored damage"}<br />GPS: {item.latitude?.toFixed(6)}, {item.longitude?.toFixed(6)}<br />Source: {item.location_source === "image_overlay" ? "Image coordinate stamp" : item.location_source === "manual" ? "Previously entered" : "EXIF metadata"}<br />Image priority proxy: {item.priority ?? "Unassessed"}<br />{item.road_id ? `Matched road: ${item.road_id}` : "Outside available road geometry"}</Popup></CircleMarker>)}
     </MapContainer></section>
-    <div className="map-legend"><div><span className="legend-line" style={{ backgroundColor: "#EF4444" }} /><span>High priority</span></div><div><span className="legend-line" style={{ backgroundColor: "#F59E0B" }} /><span>Medium priority</span></div><div><span className="legend-line" style={{ backgroundColor: "#10B981" }} /><span>Low priority</span></div><div><span className="legend-line" style={{ backgroundColor: "#1d4ed8" }} /><span>Uploaded image location</span></div></div>
+    <div className="map-legend"><div><span className="legend-line" style={{ backgroundColor: "#EF4444" }} /><span>High priority</span></div><div><span className="legend-line" style={{ backgroundColor: "#F59E0B" }} /><span>Medium priority</span></div><div><span className="legend-line" style={{ backgroundColor: "#10B981" }} /><span>Low priority</span></div><div><span className="legend-line" style={{ backgroundColor: "#347ca4" }} /><span>Image location</span></div></div>
+    {!loading && !error && !locatedObservations.length && <div className="data-note"><MapPinned size={18} /><span>No located images yet. Analyze an image with EXIF GPS or a readable coordinate stamp to place it on the map.</span><Link className="panel-action" to="/ai-analysis">Analyze images<ArrowUpRight size={15} /></Link></div>}
+    <details className="data-disclosure"><summary>Reading the map</summary><p>Blue points mark image coordinates. Colored road lines show visual priority proxies for matched damage observations. Images outside Bengaluru road coverage can still appear as points; a road line is scored only when a match is within 30 m of the available geometry.</p><p>The map includes up to 200 recent image observations. Select a point or road line to inspect its details.</p></details>
   </div>;
 }
 

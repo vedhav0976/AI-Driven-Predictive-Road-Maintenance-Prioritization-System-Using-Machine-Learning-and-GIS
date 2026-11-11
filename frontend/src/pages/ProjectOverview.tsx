@@ -1,223 +1,33 @@
-import {
-  BrainCircuit,
-  Globe2,
-  Map,
-  Server,
-} from "lucide-react";
+﻿import { Link } from "react-router-dom";
+import { ArrowRight, BrainCircuit, Database, Map, ScanLine } from "lucide-react";
+import "./WorkspacePages.css";
 
-const objectives = [
-  "Automatically detect road damage using computer vision.",
-  "Classify potholes and different road-damage categories.",
-  "Locate detected damage using geotagged imagery and GIS.",
-  "Rank detected damage observations for maintenance review.",
-  "Visualize road intelligence through an engineer dashboard.",
+const workflow = [
+  { title: "Bring in imagery", text: "Upload one image or build a queue from local files, folders, and public Drive links.", icon: ScanLine },
+  { title: "Detect visible damage", text: "The YOLO checkpoint identifies damage classes, confidence values, and bounding boxes.", icon: BrainCircuit },
+  { title: "Add spatial context", text: "Read GPS from the image and match the nearest available road segment within 30 metres.", icon: Map },
+  { title: "Save and prioritize", text: "Store the evidence and calculate visual PCI/MPI proxies for maintenance review.", icon: Database },
 ];
 
 function ProjectOverview() {
   return (
     <div className="content-page">
-      <section className="section-heading">
-        <div>
-          <p className="eyebrow">PROJECT DOCUMENTATION</p>
-
-          <h1>Project overview</h1>
-
-          <p>
-            AI-driven road resilience and maintenance
-            prioritization system for India.
-          </p>
-        </div>
+      <section className="section-heading"><div><p className="eyebrow">ABOUT THE WORKSPACE</p><h1>From road image to informed review.</h1><p>Computer vision and GIS bring road observations into one engineering workflow.</p></div></section>
+      <section className="overview-hero workspace-overview-hero">
+        <div><span className="overview-label">ROAD RESILIENCE</span><h2>See the damage.<br />Understand the location.<br /><em>Focus the next action.</em></h2><p>An AI-driven road maintenance and spatial prioritization system that connects image evidence, road geography, and saved assessments.</p><Link className="workspace-hero-link" to="/ai-analysis">Analyze a road image<ArrowRight size={17} /></Link></div>
+        <div className="workspace-overview-orbit" aria-hidden="true"><div><Map size={54} strokeWidth={1.3} /><span>IMAGE + LOCATION</span></div><i /><i /></div>
       </section>
-
-      <section className="overview-hero">
-        <div>
-          <span className="overview-label">
-            PROJECT TITLE
-          </span>
-
-          <h2>
-            AI-Driven Road Resilience and Maintenance
-            Prioritization System for India Using Computer Vision
-            and GIS
-          </h2>
-
-          <p>
-            AI detects what is wrong with the road, GIS shows where
-            it is, and the system helps prioritize roads that
-            require maintenance.
-          </p>
-        </div>
+      <section className="panel workspace-workflow-panel">
+        <div className="panel-header"><div><p className="panel-kicker">THE WORKFLOW</p><h2>One connected pipeline</h2></div><span className="muted-text">Four steps, with evidence at each stage</span></div>
+        <div className="workspace-workflow-grid">{workflow.map((step, index) => <div key={step.title}><div className="workspace-workflow-top"><span>{String(index + 1).padStart(2, "0")}</span><step.icon size={22} /></div><h3>{step.title}</h3><p>{step.text}</p></div>)}</div>
       </section>
-
       <section className="overview-grid">
-        <div className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="panel-kicker">OBJECTIVES</p>
-              <h2>System objectives</h2>
-            </div>
-          </div>
-
-          <div className="objective-list">
-            {objectives.map((objective, index) => (
-              <div className="objective-item" key={objective}>
-                <span>
-                  {String(index + 1).padStart(2, "0")}
-                </span>
-
-                <p>{objective}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="panel-kicker">TECHNOLOGY</p>
-              <h2>Technology stack</h2>
-            </div>
-          </div>
-
-          <div className="tech-grid">
-            <Tech
-              icon={<BrainCircuit />}
-              title="AI / ML"
-              text="YOLO · Python · Ultralytics"
-            />
-
-            <Tech
-              icon={<Map />}
-              title="GIS"
-              text="Leaflet · React-Leaflet · OSM"
-            />
-
-            <Tech
-              icon={<Server />}
-              title="Backend"
-              text="FastAPI · Python"
-            />
-
-            <Tech
-              icon={<Globe2 />}
-              title="Imagery"
-              text="Mapillary · Geotagged images"
-            />
-          </div>
-        </div>
+        <div className="panel"><div className="panel-header"><div><p className="panel-kicker">UNDER THE HOOD</p><h2>Technology with a clear role</h2></div></div><div className="config-list"><Config label="Detection" value="YOLO · Python · Ultralytics" /><Config label="Spatial review" value="Leaflet · OpenStreetMap · GIS matching" /><Config label="Application" value="React · FastAPI" /><Config label="Live data storage" value="Supabase PostgreSQL" /></div></div>
+        <div className="panel"><div className="panel-header"><div><p className="panel-kicker">SAVED EVIDENCE</p><h2>Trace a result to its source</h2></div></div><div className="workspace-settings-copy"><p>Every saved analysis includes its original image, annotated output, detections, extracted coordinates, and road assessment. Reopen it from History without running the model again.</p><Link className="workspace-text-link" to="/history">Review saved analyses<ArrowRight size={16} /></Link></div></div>
       </section>
-
-      <section className="overview-grid">
-        <div className="panel">
-          <div className="panel-header"><div><p className="panel-kicker">PROPOSED SOLUTION</p><h2>From image to maintenance review</h2></div></div>
-          <div className="objective-list">
-            <div className="objective-item"><span>01</span><p>YOLO detects and classifies visible road damage in uploaded imagery.</p></div>
-            <div className="objective-item"><span>02</span><p>Mapillary coordinates place available observations on a Bengaluru Leaflet map.</p></div>
-            <div className="objective-item"><span>03</span><p>Confidence-weighted observation scores help engineers review potential maintenance needs.</p></div>
-          </div>
-        </div>
-        <div className="panel">
-          <div className="panel-header"><div><p className="panel-kicker">DATA SOURCES</p><h2>Evidence used by the system</h2></div></div>
-          <div className="config-list"><Config label="Training dataset" value="RDD2022 India" /><Config label="Image observations" value="Repository-backed Mapillary metadata" /><Config label="Validation evidence" value="Saved YOLO results.csv files" /><Config label="Map layer" value="OpenStreetMap tiles + observation points" /></div>
-        </div>
-      </section>
-
-      <section className="panel architecture-panel">
-        <div className="panel-header">
-          <div>
-            <p className="panel-kicker">SYSTEM ARCHITECTURE</p>
-            <h2>End-to-end pipeline</h2>
-          </div>
-        </div>
-
-        <div className="architecture-flow">
-          <FlowItem
-            title="RDD2022 India"
-            subtitle="Training data"
-          />
-
-          <FlowArrow />
-
-          <FlowItem
-            title="YOLO"
-            subtitle="Damage detection"
-          />
-
-          <FlowArrow />
-
-          <FlowItem
-            title="Mapillary"
-            subtitle="Geotagged imagery"
-          />
-
-          <FlowArrow />
-
-          <FlowItem
-            title="Observation priority"
-            subtitle="Maintenance review"
-          />
-
-          <FlowArrow />
-
-          <FlowItem
-            title="Engineer Portal"
-            subtitle="GIS visualization"
-          />
-        </div>
-      </section>
-
-      <section className="overview-grid">
-        <div className="panel">
-          <div className="panel-header"><div><p className="panel-kicker">WORKFLOWS</p><h2>ML and GIS workflow</h2></div></div>
-          <div className="config-list"><Config label="ML workflow" value="Decode image → YOLO inference → class, confidence, box" /><Config label="GIS workflow" value="Read coordinates → map observation → inspect popup evidence" /><Config label="Prioritization" value="Confidence-weighted observation review" /></div>
-        </div>
-        <div className="panel">
-          <div className="panel-header"><div><p className="panel-kicker">LIMITATIONS & NEXT STEPS</p><h2>Scope for future work</h2></div></div>
-          <div className="priority-summary"><p>Road-segment geometry, OSM matching, traffic exposure, maintenance history, and measured condition scores are not currently available.</p><p className="muted-copy">Future work can add validated road-network data, segment aggregation, and richer engineering risk factors.</p></div>
-        </div>
-      </section>
-
+      <section className="panel workspace-scope-panel"><div className="panel-header"><div><p className="panel-kicker">READING THE EVIDENCE</p><h2>Built to support engineering judgment</h2></div></div><div className="workspace-scope-grid"><div><h3>What the system provides</h3><p>Visible damage detections, image-based GPS, configured road matching, and count-based priority proxies. Optional Mapillary records can supply additional imagery observations.</p></div><div><h3>What still needs validation</h3><p>Model detections, GPS accuracy, road assignments, and condition proxies need field review. Traffic exposure, maintenance history, and measured pavement condition are not included in the current score.</p></div></div></section>
     </div>
   );
-}
-
-function Tech({
-  icon,
-  title,
-  text,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  text: string;
-}) {
-  return (
-    <div className="tech-card">
-      {icon}
-
-      <strong>{title}</strong>
-
-      <span>{text}</span>
-    </div>
-  );
-}
-
-function FlowItem({
-  title,
-  subtitle,
-}: {
-  title: string;
-  subtitle: string;
-}) {
-  return (
-    <div className="flow-item">
-      <strong>{title}</strong>
-      <span>{subtitle}</span>
-    </div>
-  );
-}
-
-function FlowArrow() {
-  return <div className="flow-arrow">→</div>;
 }
 
 function Config({ label, value }: { label: string; value: string }) {

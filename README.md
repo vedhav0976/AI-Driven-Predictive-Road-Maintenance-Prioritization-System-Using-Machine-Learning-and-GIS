@@ -12,7 +12,7 @@ A prototype for exploring road damage and maintenance review in Bengaluru. It ha
 | History (`/history`) | Search and page through saved analyses; open each result to view the original and annotated images, detection boxes, coordinates, and PCI/MPI proxies. |
 | Model Performance (`/model-performance`) | Shows checkpoint-linked, user-reported overall and per-class validation results. A matching training `results.csv`, when supplied, takes precedence. |
 | Backend data endpoints | Read saved uploads and optional Mapillary metadata, detections, and sample images. Uploaded detections include approximate GPS road matching and visual condition proxies. |
-| Login and Settings | Presentation UI. The login form navigates to the dashboard without authentication; settings are informational. |
+| Workspace entry and Settings | A public “Open workspace” entry leads to the dashboard. Settings explain storage and assessment rules; account authentication is not configured. |
 
 Run AI Damage Analysis to add uploaded detections to the dashboard, map, and review queue. An upload receives coordinates from EXIF GPS or OCR of a labeled decimal coordinate stamp printed on the image. The nearest road line is assigned only within 30 m. Points outside available road coverage still appear on the map, but have no road-segment color. If neither EXIF nor a readable stamp exists, the image remains unlocated. The default checked-in Bengaluru GeoJSON has local feature IDs; an explicit OSMnx import can provide OSM graph-edge IDs. Neither match is field-validated.
 

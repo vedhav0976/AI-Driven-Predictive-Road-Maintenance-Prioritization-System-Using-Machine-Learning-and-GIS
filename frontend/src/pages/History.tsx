@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, ChevronLeft, ChevronRight, History as HistoryIcon, Search, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, ChevronLeft, ChevronRight, History as HistoryIcon, Plus, Search, Trash2, X } from "lucide-react";
 import { API_BASE, apiFetch } from "../api";
 import type { SavedAnalysisDetail, SavedAnalysisSummary } from "../api";
+import "./AnalysisWorkspace.css";
 
 const PAGE_SIZE = 20;
 
@@ -42,17 +43,17 @@ function HistoryList() {
   }, [offset, query]);
 
   return <div className="content-page">
-    <section className="section-heading"><div><p className="eyebrow">SAVED RESULTS</p><h1>Analysis history</h1><p>Open any previous upload to review its images, detections, and road assessment.</p></div></section>
+    <section className="section-heading"><div><p className="eyebrow">YOUR IMAGE LIBRARY</p><h1>Analysis history</h1><p>Every road image, finding, and assessment in one place.</p></div><Link className="analysis-run-button" to="/ai-analysis"><Plus size={18} />New analysis</Link></section>
     <section className="panel history-panel">
-      <div className="panel-header"><div><p className="panel-kicker">UPLOADS</p><h2>Previous analyses</h2></div><span className="muted-text">{total} saved</span></div>
-      <div className="history-toolbar"><label className="search-field"><Search size={17} /><input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="Search image name" aria-label="Search analysis history" /></label></div>
+      <div className="panel-header"><div><p className="panel-kicker">SAVED RESULTS</p><h2>Previous analyses</h2></div><span className="analysis-format-chip">{total} {query ? "matching" : "saved"}</span></div>
+      <div className="history-toolbar"><label className="search-field"><Search size={17} /><input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="Search by image name…" aria-label="Search analysis history" />{searchInput && <button className="history-clear-search" type="button" onClick={() => setSearchInput("")} aria-label="Clear search"><X size={16} /></button>}</label><span className="history-sort-note">Newest first</span></div>
       {error && <div className="history-message" role="alert">Could not load history: {error}</div>}
-      {loading && <div className="history-message">Loading saved analyses…</div>}
-      {!loading && !error && records.length === 0 && <div className="empty-state"><HistoryIcon size={28} /><h3>{query ? "No matching analyses" : "No analyses yet"}</h3><p>{query ? "Try another image name." : "Upload a road image to start your history."}</p></div>}
+      {loading && <div className="history-message" role="status"><span className="loading-spinner" />Loading saved analyses…</div>}
+      {!loading && !error && records.length === 0 && <div className="empty-state"><HistoryIcon size={28} /><h3>{query ? "No matching analyses" : "Your road image library starts here"}</h3><p>{query ? "Try a different image name or clear the search." : "Analyze your first road photo to save images, detections, and condition scores."}</p>{!query && <Link className="panel-action" to="/ai-analysis">Start an analysis<ArrowUpRight size={16} /></Link>}</div>}
       {!loading && !error && records.length > 0 && <div className="history-list">{records.map((item) =>
         <Link to={`/history/${item.id}`} className="history-entry" key={item.id}>
           <img src={`${API_BASE}${item.annotated_image_url}`} alt={`Annotated result for ${item.filename}`} loading="lazy" />
-          <div className="history-entry-main"><strong>{item.filename}</strong><span>{dateLabel(item.created_at)} · {item.detection_count} detection{item.detection_count === 1 ? "" : "s"}</span><span>{item.road_name ?? item.road_id ?? (item.latitude == null ? "No readable GPS" : "Outside local road coverage")}</span></div>
+          <div className="history-entry-main"><strong>{item.filename}</strong><span>{dateLabel(item.created_at)} · {item.detection_count} detection{item.detection_count === 1 ? "" : "s"}</span><span className="history-road-label">{item.road_name ?? item.road_id ?? (item.latitude == null ? "No readable GPS" : "Outside local road coverage")}</span></div>
           <div className="history-entry-side">{item.priority ? <span className={`priority-pill ${item.priority.toLowerCase()}`}>{item.priority}</span> : <span>Unassessed</span>}<span>View analysis <ChevronRight size={16} /></span></div>
         </Link>,
       )}</div>}
@@ -101,7 +102,7 @@ function HistoryDetail({ recordId }: { recordId: string }) {
     {error && <div className="history-message" role="alert">Could not load analysis: {error}</div>}
     {!record && !error && <div className="history-message">Loading analysis…</div>}
     {record && <>
-      {confirmingDelete && <section className="panel history-delete-panel" aria-label="Confirm deletion"><h2>Delete this analysis?</h2><p>This permanently removes the result, original and annotated images, and its road assessment from the live database.</p><form onSubmit={removeAnalysis}><label htmlFor="delete-key">Deletion key</label><input id="delete-key" type="password" autoComplete="off" value={deleteKey} onChange={(event) => setDeleteKey(event.target.value)} required disabled={deleting} /><div className="history-delete-actions"><button type="button" onClick={() => { setConfirmingDelete(false); setDeleteKey(""); setDeleteError(null); }} disabled={deleting}>Cancel</button><button className="history-delete-confirm" type="submit" disabled={deleting || !deleteKey.trim()}>{deleting ? "Deleting…" : "Permanently delete"}</button></div></form>{deleteError && <p className="history-delete-error" role="alert">{deleteError}</p>}</section>}
+      {confirmingDelete && <section className="panel history-delete-panel" aria-label="Confirm deletion"><div className="history-delete-heading"><span><Trash2 size={20} /></span><div><h2>Delete this analysis?</h2><p>Analysis #{record.id} · This action cannot be undone.</p></div></div><p>This removes the saved result, original and annotated images, and its road assessment from the live database.</p><form onSubmit={removeAnalysis}><label htmlFor="delete-key">Enter your deletion key</label><input id="delete-key" type="password" autoComplete="off" placeholder="Deletion key" aria-describedby="delete-key-help" value={deleteKey} onChange={(event) => setDeleteKey(event.target.value)} required disabled={deleting} autoFocus /><span className="history-delete-help" id="delete-key-help">Only an administrator with the deletion key can remove a saved analysis.</span><div className="history-delete-actions"><button type="button" onClick={() => { setConfirmingDelete(false); setDeleteKey(""); setDeleteError(null); }} disabled={deleting}>Keep analysis</button><button className="history-delete-confirm" type="submit" disabled={deleting || !deleteKey.trim()}><Trash2 size={16} />{deleting ? "Deleting…" : "Permanently delete"}</button></div></form>{deleteError && <p className="history-delete-error" role="alert">{deleteError}</p>}</section>}
       <section className="panel history-detail-summary"><div className="panel-header"><div><p className="panel-kicker">ANALYSIS #{record.id}</p><h2>{record.filename}</h2></div>{record.priority ? <span className={`priority-pill ${record.priority.toLowerCase()}`}>{record.priority}</span> : <span className="muted-text">Unassessed</span>}</div>
         <div className="history-facts"><div><span>Analyzed</span><strong>{dateLabel(record.created_at)}</strong></div><div><span>Detections</span><strong>{record.detection_count}</strong></div><div><span>Location</span><strong>{locationLabel(record)}</strong></div><div><span>Road segment</span><strong>{record.road_name ?? record.road_id ?? (record.latitude == null ? "No GPS" : "Outside local coverage")}</strong></div><div><span>PCI proxy</span><strong>{record.pci_proxy?.toFixed(1) ?? "Unassessed"}</strong></div><div><span>MPI proxy</span><strong>{record.mpi_proxy?.toFixed(1) ?? "Unassessed"}</strong></div></div>
       </section>

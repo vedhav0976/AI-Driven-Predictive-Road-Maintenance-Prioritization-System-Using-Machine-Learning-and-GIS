@@ -1,15 +1,16 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { lazy } from "react";
 
 import AppLayout from "./components/AppLayout";
 import Login from "./pages/Login";
-import Dashboard from "./pages/Dashboard";
-import RoadMap from "./pages/RoadMap";
-import RoadAssessment from "./pages/RoadAssessment";
-import AIDamageAnalysis from "./pages/AIDamageAnalysis";
-import History from "./pages/History";
-import ModelPerformance from "./pages/ModelPerformance";
-import ProjectOverview from "./pages/ProjectOverview";
-import Settings from "./pages/Settings";
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const RoadMap = lazy(() => import("./pages/RoadMap"));
+const RoadAssessment = lazy(() => import("./pages/RoadAssessment"));
+const AIDamageAnalysis = lazy(() => import("./pages/AIDamageAnalysis"));
+const History = lazy(() => import("./pages/History"));
+const ModelPerformance = lazy(() => import("./pages/ModelPerformance"));
+const ProjectOverview = lazy(() => import("./pages/ProjectOverview"));
+const Settings = lazy(() => import("./pages/Settings"));
 
 function App() {
   return (
