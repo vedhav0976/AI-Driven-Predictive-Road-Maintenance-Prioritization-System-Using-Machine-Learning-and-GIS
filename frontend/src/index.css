@@ -1790,6 +1790,27 @@ a {
   font-size: 11px;
 }
 
+.drive-link-input {
+  min-height: 44px;
+  min-width: min(100%, 320px);
+  flex: 1;
+  padding: 0 12px;
+  border: 1px solid #d8e1e8;
+  border-radius: 10px;
+  color: #26364d;
+}
+
+.drive-queue-icon {
+  width: 72px;
+  height: 60px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #eef5fc;
+  color: #356f9f;
+  font-weight: 700;
+}
+
 .bulk-progress {
   display: block;
   width: calc(100% - 44px);

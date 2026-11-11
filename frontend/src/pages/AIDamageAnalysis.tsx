@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, BrainCircuit, CheckCircle2, FolderOpen, Upload } from "lucide-react";
+import { AlertTriangle, BrainCircuit, CheckCircle2, Upload } from "lucide-react";
 import { API_BASE, apiFetch, sampleUrl } from "../api";
 import type { Detection, ModelInfo } from "../api";
 
@@ -34,10 +34,11 @@ type BulkAnalysisResult = Omit<AnalysisResult, "annotated_image"> & {
 };
 type BulkItem = {
   id: string;
-  file: File;
+  file?: File;
+  driveLink?: string;
   signature: string;
   displayName: string;
-  previewUrl: string;
+  previewUrl?: string;
   status: "queued" | "processing" | "complete" | "failed";
   result?: BulkAnalysisResult;
   error?: string;
@@ -67,10 +68,15 @@ function AIDamageAnalysis() {
   const [bulkQueue, setBulkQueue] = useState<BulkItem[]>([]);
   const [bulkNotice, setBulkNotice] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [addingDrive, setAddingDrive] = useState(false);
+  const [bulkSource, setBulkSource] = useState<"files" | "folder" | "drive">("files");
+  const [driveLink, setDriveLink] = useState("");
   const [stopAfterCurrent, setStopAfterCurrent] = useState(false);
   const stopBulkRef = useRef(false);
   const bulkRunRef = useRef(false);
   const bulkPreviewUrls = useRef<Set<string>>(new Set());
+  const filesInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const urls = bulkPreviewUrls.current;
@@ -169,16 +175,46 @@ function AIDamageAnalysis() {
     event.target.value = "";
   };
 
+  const addDriveLink = async () => {
+    const link = driveLink.trim();
+    try {
+      const url = new URL(link);
+      if (url.protocol !== "https:" || !["drive.google.com", "www.drive.google.com"].includes(url.hostname)) {
+        throw new Error("Paste a Google Drive sharing link.");
+      }
+      setAddingDrive(true);
+      setBulkNotice(null);
+      const isFolder = url.pathname.split("/").includes("folders");
+      const images = isFolder
+        ? (await apiFetch<{ images: Array<{ name: string; link: string }> }>("/api/drive/list", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link }),
+        })).images
+        : [{ name: "Drive image", link }];
+      const existing = new Set(bulkQueue.map((item) => item.signature));
+      const additions: BulkItem[] = images.flatMap((image) => {
+        const signature = `drive:${image.link}`;
+        if (existing.has(signature)) return [];
+        existing.add(signature);
+        return [{ id: crypto.randomUUID(), driveLink: image.link, signature, displayName: image.name, status: "queued" as const }];
+      });
+      setBulkQueue((current) => [...current, ...additions]);
+      setBulkNotice(`${additions.length} Drive image${additions.length === 1 ? "" : "s"} added to the queue${images.length > additions.length ? `; ${images.length - additions.length} already queued` : ""}.`);
+      setDriveLink("");
+    } catch (reason) {
+      setBulkNotice(reason instanceof Error ? reason.message : "Could not add the Drive link.");
+    } finally {
+      setAddingDrive(false);
+    }
+  };
+
   const removeBulkItem = (item: BulkItem) => {
-    URL.revokeObjectURL(item.previewUrl);
-    bulkPreviewUrls.current.delete(item.previewUrl);
+    if (item.previewUrl) { URL.revokeObjectURL(item.previewUrl); bulkPreviewUrls.current.delete(item.previewUrl); }
     setBulkQueue((current) => current.filter((entry) => entry.id !== item.id));
   };
 
   const clearBulkQueue = () => {
     for (const item of bulkQueue) {
-      URL.revokeObjectURL(item.previewUrl);
-      bulkPreviewUrls.current.delete(item.previewUrl);
+      if (item.previewUrl) { URL.revokeObjectURL(item.previewUrl); bulkPreviewUrls.current.delete(item.previewUrl); }
     }
     setBulkQueue([]);
     setBulkNotice(null);
@@ -196,12 +232,17 @@ function AIDamageAnalysis() {
         if (stopBulkRef.current) break;
         setBulkQueue((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: "processing" } : entry));
         try {
-          const form = new FormData();
-          form.append("file", item.file);
-          const result = await apiFetch<BulkAnalysisResult>("/api/upload?include_annotated_image=false", {
-            method: "POST",
-            body: form,
-          });
+          let result: BulkAnalysisResult;
+          if (item.driveLink) {
+            result = await apiFetch<BulkAnalysisResult>("/api/drive/analyze", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ link: item.driveLink, name: item.displayName === "Drive image" ? undefined : item.displayName }),
+            });
+          } else {
+            const form = new FormData();
+            form.append("file", item.file!);
+            result = await apiFetch<BulkAnalysisResult>("/api/upload?include_annotated_image=false", { method: "POST", body: form });
+          }
           setBulkQueue((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: "complete", result } : entry));
         } catch (reason) {
           const message = reason instanceof Error ? reason.message : "Analysis failed.";
@@ -272,21 +313,23 @@ function AIDamageAnalysis() {
 
       {mode === "bulk" && <section className="panel">
         <div className="panel-header"><div><p className="panel-kicker">BULK INFERENCE</p><h2>Process multiple road images</h2></div></div>
-        <p className="muted-text">Add images or a folder to the queue. Images are processed one at a time, and each result is saved separately.</p>
+        <p className="muted-text">Add images from your device or a public Google Drive link. The same queue processes every image one at a time.</p>
         <div className="analysis-controls">
-          <label className="analysis-upload-button">
-            <Upload size={18} /><span>Add images</span>
-            <input type="file" accept="image/*" multiple onChange={chooseBulkFiles} disabled={busy || bulkBusy} hidden />
-          </label>
-          <label className="analysis-upload-button">
-            <FolderOpen size={18} /><span>Add folder</span>
-            <input type="file" multiple ref={(input) => { if (input) input.setAttribute("webkitdirectory", ""); }} onChange={chooseBulkFiles} disabled={busy || bulkBusy} hidden />
-          </label>
+          <select aria-label="Image source" value={bulkSource} onChange={(event) => setBulkSource(event.target.value as "files" | "folder" | "drive")} disabled={busy || bulkBusy || addingDrive}>
+            <option value="files">Images on device</option><option value="folder">Folder on device</option><option value="drive">Google Drive link</option>
+          </select>
+          {bulkSource === "drive" && <input className="drive-link-input" type="url" aria-label="Public Google Drive file or folder link" placeholder="Paste public Drive file or folder link" value={driveLink} onChange={(event) => setDriveLink(event.target.value)} disabled={busy || bulkBusy || addingDrive} />}
+          <input ref={filesInput} type="file" accept="image/*" multiple onChange={chooseBulkFiles} disabled={busy || bulkBusy || addingDrive} hidden />
+          <input ref={(input) => { folderInput.current = input; if (input) input.setAttribute("webkitdirectory", ""); }} type="file" multiple onChange={chooseBulkFiles} disabled={busy || bulkBusy || addingDrive} hidden />
+          <button className="analysis-upload-button" type="button" onClick={() => bulkSource === "drive" ? void addDriveLink() : (bulkSource === "folder" ? folderInput : filesInput).current?.click()} disabled={busy || bulkBusy || addingDrive || (bulkSource === "drive" && !driveLink.trim())}>
+            <Upload size={18} />{addingDrive ? "Adding…" : "Add to queue"}
+          </button>
           <button className="analysis-run-button" type="button" onClick={processBulk} disabled={busy || bulkBusy || !bulkPending}>
             <BrainCircuit size={18} />{bulkBusy ? "Processing queue…" : bulkFinished ? "Process remaining" : "Run Bulk Analysis"}
           </button>
           {bulkBusy && <button className="panel-action" type="button" onClick={() => { stopBulkRef.current = true; setStopAfterCurrent(true); }} disabled={stopAfterCurrent}>{stopAfterCurrent ? "Stopping after current image…" : "Stop after current image"}</button>}
         </div>
+        {bulkSource === "drive" && <p className="bulk-notice">Share the Drive image or folder as “Anyone with the link.” Folder import requires the server's Google Drive API key.</p>}
         {bulkNotice && <p className="bulk-notice" role="status">{bulkNotice}</p>}
         {bulkQueue.length > 0 && <>
           <div className="bulk-queue-heading"><div><strong>Processing queue</strong><span>{bulkQueue.length} image{bulkQueue.length === 1 ? "" : "s"} · {bulkFinished} finished{bulkBusy ? " · processing one image at a time" : ""}</span></div><button className="panel-action" type="button" onClick={clearBulkQueue} disabled={bulkBusy}>Clear queue</button></div>
@@ -294,8 +337,8 @@ function AIDamageAnalysis() {
           <ol className="bulk-results">
             {bulkQueue.map((item) => <li key={item.id} className="bulk-result-row">
               <div className="bulk-row-main">
-                <img src={item.previewUrl} alt={`Original ${item.displayName}`} loading="lazy" />
-                <div className="bulk-row-name"><strong>{item.displayName}</strong><span>{(item.file.size / 1024 / 1024).toFixed(2)} MB</span></div>
+                {item.previewUrl ? <img src={item.previewUrl} alt={`Original ${item.displayName}`} loading="lazy" /> : <span className="drive-queue-icon">Drive</span>}
+                <div className="bulk-row-name"><strong>{item.displayName}</strong><span>{item.file ? `${(item.file.size / 1024 / 1024).toFixed(2)} MB` : "Google Drive"}</span></div>
                 <span className={`bulk-status ${item.status}`}>{item.status}</span>
                 <button className="panel-action" type="button" onClick={() => removeBulkItem(item)} disabled={bulkBusy} aria-label={`Remove ${item.displayName} from queue`}>Remove</button>
               </div>

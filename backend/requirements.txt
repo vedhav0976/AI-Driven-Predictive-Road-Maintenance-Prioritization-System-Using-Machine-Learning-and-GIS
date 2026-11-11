@@ -6,6 +6,7 @@ python-multipart>=0.0.9,<1
 uvicorn[standard]>=0.30,<1
 ultralytics-opencv-headless>=8.3,<9
 Pillow>=10,<13
+requests>=2.32,<3
 opencv-python-headless==4.11.0.86
 SQLAlchemy>=2.0,<3
 psycopg[binary]>=3.2,<4

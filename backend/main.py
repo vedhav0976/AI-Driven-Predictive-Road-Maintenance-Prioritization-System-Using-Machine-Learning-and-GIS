@@ -18,6 +18,8 @@ from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from starlette.datastructures import Headers
 from PIL import Image
 from sqlalchemy import delete, func, select, true
 from ultralytics import YOLO
@@ -25,6 +27,7 @@ from ultralytics import YOLO
 from backend.assessment import road_geometry, score_detections, snap_to_road
 from backend.annotations import render_annotations, suppress_duplicate_boxes
 from backend.geotag import extract_image_location
+from backend.drive_import import DriveImportError, download_image, list_folder_images
 from backend.database import (
     DamageDetection, DetectionRecord, ImageAsset, Observation, RoadSegment, get_session,
     delete_analysis, initialize_database, persist_observation, refresh_road_segment, relocate_observation,
@@ -1007,6 +1010,30 @@ async def analyze_damage(
         if not detections
         else f"{len(detections)} damage instance(s) detected.",
     }
+
+
+class DriveLinkRequest(BaseModel):
+    link: str
+    name: str | None = None
+
+
+@app.post("/api/drive/list")
+def list_drive_folder(request: DriveLinkRequest) -> dict[str, Any]:
+    try:
+        return {"images": list_folder_images(request.link)}
+    except DriveImportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/drive/analyze")
+async def analyze_drive_image(request: DriveLinkRequest) -> dict[str, Any]:
+    try:
+        content, default_name, mime = download_image(request.link)
+    except DriveImportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    name = (request.name or default_name).replace("\\", "/").split("/")[-1][:255] or default_name
+    file = UploadFile(file=io.BytesIO(content), filename=name, headers=Headers({"content-type": mime}))
+    return await analyze_damage(file, include_annotated_image=False)
 
 
 if FRONTEND_DIST.is_dir():

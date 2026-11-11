@@ -8,7 +8,7 @@ A prototype for exploring road damage and maintenance review in Bengaluru. It ha
 | --- | --- |
 | Dashboard | Fetches `/api/dashboard` on load and every 30 seconds. It displays saved uploads, optional Mapillary detections, scored road-segment priority totals, model status, and an empty/error state. |
 | Road Map, Road Assessment | Fetch `/api/map` and `/api/observations` every 30 seconds. The map draws scored road geometry and uploaded image locations; the queue shows saved analyses and can recheck GPS from a saved image. |
-| AI Damage Analysis (`/ai-analysis`) | A toggle shows either single-image or sequential bulk upload. Bulk mode accepts multiple files or a folder, keeps later selections in the queue, and shows original/annotated previews plus each image's result. GPS is read automatically from EXIF or a visible camera-app coordinate stamp. |
+| AI Damage Analysis (`/ai-analysis`) | A toggle shows either single-image or sequential queue upload. The queue has one Add button with a source selector for local images, a local folder, or a public Google Drive image/folder link. It shows each result and processes images one at a time. GPS is read automatically from EXIF or a visible camera-app coordinate stamp. |
 | History (`/history`) | Search and page through saved analyses; open each result to view the original and annotated images, detection boxes, coordinates, and PCI/MPI proxies. |
 | Model Performance (`/model-performance`) | Shows checkpoint-linked, user-reported overall and per-class validation results. A matching training `results.csv`, when supplied, takes precedence. |
 | Backend data endpoints | Read saved uploads and optional Mapillary metadata, detections, and sample images. Uploaded detections include approximate GPS road matching and visual condition proxies. |
@@ -124,6 +124,8 @@ The backend reads these local files; it does not fetch images from the live Mapi
 | GET | `/api/samples/{filename}` | A local sample JPEG |
 | POST | `/api/damage/analyze` | Multipart image field named `file`; saves inference and returns detections and a base64 JPEG annotation |
 | POST | `/api/upload` | Alias for the same upload and inference pipeline |
+| POST | `/api/drive/list` | List supported images in a public Google Drive folder; requires server-side `GOOGLE_DRIVE_API_KEY` |
+| POST | `/api/drive/analyze` | Download one public Drive image, then save it through the same inference pipeline |
 
 For example:
 
@@ -131,7 +133,7 @@ For example:
 curl -F "file=@road.jpg" http://127.0.0.1:8000/api/damage/analyze
 ```
 
-Uploads must have an image content type, be readable by Pillow, and be no larger than 15 MB each. The default confidence threshold is `0.25` and inference size is `960`. For images without EXIF GPS, RapidOCR looks for labeled decimal `Lat` and `Long` values near the top or bottom of the image. OCR may fail on blurred, cropped, or differently formatted stamps; it never guesses coordinates. In bulk mode, **Add images** and **Add folder** append image files to a visible queue; non-image files are skipped. The UI sends one `/api/upload` request at a time, continues after individual failures, and shows per-image progress, annotated previews, and results. It passes `include_annotated_image=false` to omit the large base64 annotation from each response; the saved annotated JPEG remains available at `annotated_image_url`. The single-image flow still returns the inline annotation.
+Uploads must have an image content type, be readable by Pillow, and be no larger than 15 MB each. The default confidence threshold is `0.25` and inference size is `960`. For images without EXIF GPS, RapidOCR looks for labeled decimal `Lat` and `Long` values near the top or bottom of the image. OCR may fail on blurred, cropped, or differently formatted stamps; it never guesses coordinates. In queue mode, select **Images on device**, **Folder on device**, or **Google Drive link**, then use the same **Add to queue** button. Public Drive file links add one image; public Drive folder links list supported images when the API key is configured. The UI processes queue items one at a time, continues after individual failures, and shows per-image progress and results. It omits the large base64 annotation from queue responses; the saved annotated JPEG remains available at `annotated_image_url`. The single-image flow still returns the inline annotation.
 
 When two detections cover nearly the same pixels (intersection over union at least `0.85`), the higher-confidence label is kept. Annotated images use numbered boxes and a separate legend so class labels do not overlap. Existing saved records with duplicate boxes are repaired on backend startup.
 
@@ -144,6 +146,7 @@ When two detections cover nearly the same pixels (intersection over union at lea
 | `ROAD_RESILIENCE_CONFIDENCE` | Backend | `0.25` |
 | `ROAD_RESILIENCE_IMAGE_SIZE` | Backend | `960` |
 | `ROAD_RESILIENCE_ROADS_FILE` | Backend | `data/osm_roads.geojson` when present, otherwise checked-in local GeoJSON |
+| `GOOGLE_DRIVE_API_KEY` | Backend | Unset; required to list public Drive folders, optional for a public Drive image file |
 | `ROAD_RESILIENCE_DELETE_KEY` | Backend | Unset; deletion is disabled until a secret key is configured |
 | `DATABASE_URL` or `POSTGRES_URL_NON_POOLING` | Backend | SQLite database under `backend/storage/` when neither is set |
 
@@ -157,6 +160,8 @@ The dashboard is deployed as the `road-maintenance-ai` Vercel project at `https:
 4. Check the API `/health` and `model.status`, then open the dashboard and verify History and images. The four pre-deployment analyses were copied from Neon to Supabase using `python -m backend.migrate_postgres_to_postgres`; that command needs Neon `DATABASE_URL` and prefixed Supabase `SUPABASE_POSTGRES_URL_NON_POOLING` in its environment and requires an empty destination database.
 
 To delete a saved analysis, open it from **History**, choose **Delete analysis**, enter the deletion key, and confirm. This removes the analysis, original and annotated image bytes, and its road observation from the active database; the affected road segment score is recalculated. Configure `ROAD_RESILIENCE_DELETE_KEY` as a secret environment variable on the API project, then redeploy the API. Keep the key out of Git and share it only with administrators. Deletion does not remove records from separately retained database backups.
+
+For shared Drive folders, enable the Google Drive API in a Google Cloud project, create an API key restricted to the Drive API, and set `GOOGLE_DRIVE_API_KEY` as a secret in the API Vercel project. Redeploy the API after adding it. Links must be shared as **Anyone with the link**. Individual public image links can use Drive's download link without a key; some Drive files may still require the API key or may not allow automated downloads. Only images directly inside the shared folder are listed (up to 200 per import). Private Drive links require OAuth and are not supported.
 
 PyTorch, Ultralytics, OpenCV, OCR, and the checkpoint make the backend a large Python function. A deployed build and public API health check passed; a live image inference request has not yet been tested. Vercel Functions limit request bodies to 4.5 MB, so larger image uploads need a direct-to-storage flow or another backend host. The local SQLite file and uploaded images are ignored by Git. Public image endpoints and upload APIs have no authentication, so restrict access before using sensitive imagery.
 
