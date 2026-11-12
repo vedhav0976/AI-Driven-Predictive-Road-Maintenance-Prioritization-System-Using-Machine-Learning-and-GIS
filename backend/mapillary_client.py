@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import math
 import os
 import re
@@ -16,6 +17,7 @@ GRAPH_URL = "https://graph.mapillary.com"
 MAX_IMAGE_BYTES = 15 * 1024 * 1024
 IMAGE_FIELDS = "id,geometry,computed_geometry,captured_at,creator,thumb_256_url,thumb_1024_url,is_pano"
 LICENSE_URL = "https://creativecommons.org/licenses/by-sa/4.0/"
+logger = logging.getLogger("road_resilience.mapillary")
 
 
 class MapillaryError(ValueError):
@@ -56,6 +58,19 @@ def _graph(path: str, params: dict | None = None) -> dict:
     except requests.RequestException as exc:
         raise MapillaryError("Mapillary could not be reached. Please try again.") from exc
     try:
+        if response.status_code != 200:
+            # Provider messages can contain request credentials; record only safe numeric diagnostics.
+            provider_code = None
+            try:
+                body = response.json()
+                error = body.get("error") if isinstance(body, dict) else None
+                if isinstance(error, dict) and isinstance(error.get("code"), int):
+                    provider_code = error["code"]
+            except ValueError:
+                pass
+            logger.warning("Mapillary Graph error: HTTP %s, provider code %s", response.status_code, provider_code)
+            if provider_code in {102, 190}:
+                raise MapillaryError("Mapillary rejected the access token. Check the server's Mapillary connection.", 503)
         if response.status_code in {401, 403}:
             raise MapillaryError("Mapillary rejected the access token. Check the server's Mapillary connection.", 503)
         if response.status_code == 404:

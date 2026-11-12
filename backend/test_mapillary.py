@@ -110,6 +110,12 @@ class MapillaryClientTests(unittest.TestCase):
                 mapillary.get_image("123456789")
 
     def test_upstream_errors_are_sanitized(self):
+        expired = self.response({"error": {"code": 190, "message": "private-test-token"}}, status=400)
+        with patch.object(mapillary.requests, "get", return_value=expired), self.assertLogs(mapillary.logger, level="WARNING") as logs:
+            with self.assertRaises(mapillary.MapillaryError) as caught:
+                mapillary.get_image("123456789")
+            self.assertEqual(caught.exception.status_code, 503)
+            self.assertNotIn("private-test-token", " ".join(logs.output))
         for status, expected in ((401, 503), (403, 503), (404, 404), (429, 429), (500, 502)):
             with self.subTest(status=status), patch.object(mapillary.requests, "get", return_value=self.response({"error": "private-test-token"}, status=status)):
                 with self.assertRaises(mapillary.MapillaryError) as caught:
