@@ -8,7 +8,7 @@ A prototype for exploring road damage and maintenance review in Bengaluru. It ha
 | --- | --- |
 | Dashboard | Fetches `/api/dashboard` on load and every 30 seconds. It displays saved uploads, optional Mapillary detections, scored road-segment priority totals, model status, and an empty/error state. |
 | Road Map, Road Assessment | Fetch `/api/map` and `/api/observations` every 30 seconds. The map draws scored road geometry and uploaded image locations; the queue shows saved analyses and can recheck GPS from a saved image. |
-| AI Damage Analysis (`/ai-analysis`) | A toggle shows either single-image or sequential queue upload. The queue has one Add button with a source selector for local images, a local folder, or a public Google Drive image/folder link. It shows each result and processes images one at a time. GPS is read automatically from EXIF or a visible camera-app coordinate stamp. |
+| AI Damage Analysis (`/ai-analysis`) | Single-image or sequential queue analysis. One Add button accepts local images, a local folder, public Drive links, or selected Mapillary images. A map-area search shows Mapillary thumbnails, capture dates, and contributor credits. Coordinates come from EXIF, a readable image stamp, or the Mapillary API. |
 | History (`/history`) | Search and page through saved analyses; open each result to view the original and annotated images, detection boxes, coordinates, and PCI/MPI proxies. |
 | Model Performance (`/model-performance`) | Shows checkpoint-linked, user-reported overall and per-class validation results. A matching training `results.csv`, when supplied, takes precedence. |
 | Backend data endpoints | Read saved uploads and optional Mapillary metadata, detections, and sample images. Uploaded detections include approximate GPS road matching and visual condition proxies. |
@@ -120,6 +120,9 @@ The backend reads these local files; it does not fetch images from the live Mapi
 | GET | `/api/detections/{record_id}/image` | Saved annotated JPEG |
 | GET | `/api/detections/{record_id}/original` | Saved original image |
 | GET | `/api/mapillary` | Saved image metadata with associated detections |
+| GET | `/api/mapillary/status` | Whether the server has a Mapillary token configured; never returns the token |
+| GET | `/api/mapillary/search` | Live imagery in `bbox=west,south,east,north`; up to 50 results, maximum 0.1 degrees per side |
+| POST | `/api/mapillary/analyze` | Analyze `{"image_id":"..."}` using Mapillary imagery and API coordinates; reuse an existing saved result for the same image |
 | GET | `/api/samples` | Available local sample images |
 | GET | `/api/samples/{filename}` | A local sample JPEG |
 | POST | `/api/damage/analyze` | Multipart image field named `file`; saves inference and returns detections and a base64 JPEG annotation |
@@ -147,6 +150,7 @@ When two detections cover nearly the same pixels (intersection over union at lea
 | `ROAD_RESILIENCE_IMAGE_SIZE` | Backend | `960` |
 | `ROAD_RESILIENCE_ROADS_FILE` | Backend | `data/osm_roads.geojson` when present, otherwise checked-in local GeoJSON |
 | `GOOGLE_DRIVE_API_KEY` | Backend | Unset; required to list public Drive folders, optional for a public Drive image file |
+| `MAPILLARY_ACCESS_TOKEN` | Backend | Unset; enables live Mapillary imagery search and analysis |
 | `ROAD_RESILIENCE_DELETE_KEY` | Backend | Unset; deletion is disabled until a secret key is configured |
 | `DATABASE_URL` or `POSTGRES_URL_NON_POOLING` | Backend | SQLite database under `backend/storage/` when neither is set |
 
@@ -162,6 +166,17 @@ The dashboard is deployed as the `road-maintenance-ai` Vercel project at `https:
 To delete a saved analysis, open it from **History**, choose **Delete analysis**, enter the deletion key, and confirm. This removes the analysis, original and annotated image bytes, and its road observation from the active database; the affected road segment score is recalculated. Configure `ROAD_RESILIENCE_DELETE_KEY` as a secret environment variable on the API project, then redeploy the API. Keep the key out of Git and share it only with administrators. Deletion does not remove records from separately retained database backups.
 
 For shared Drive folders, enable the Google Drive API in a Google Cloud project, create an API key restricted to the Drive API, and set `GOOGLE_DRIVE_API_KEY` as a secret in the API Vercel project. Redeploy the API after adding it. Links must be shared as **Anyone with the link**. Individual public image links can use Drive's download link without a key; some Drive files may still require the API key or may not allow automated downloads. Only images directly inside the shared folder are listed (up to 200 per import). Private Drive links require OAuth and are not supported.
+
+### Live Mapillary imagery
+
+1. Create or use a client access token from the [Mapillary developer dashboard](https://www.mapillary.com/dashboard/developers). Store it as `MAPILLARY_ACCESS_TOKEN` in the repository root `.env` or `.env.local`. The backend reads these files at startup without overriding already-set environment variables. These files are ignored by Git and Vercel uploads. Keep the token on the backend; do not prefix it with `VITE_`.
+2. For the hosted app, set that variable as a secret on the **API** Vercel project and redeploy it. The dashboard needs no Mapillary token.
+3. Open **AI Damage Analysis → Bulk upload → Mapillary imagery**. Pan/zoom the map to a small road area, choose **Search this area**, select images, use the existing **Add to queue** button, then **Run analysis**. Up to 24 images are shown per UI search; the initial map centers on Bengaluru. Search supports other areas, while road snapping uses only the configured road geometry.
+4. Each selected image is downloaded by ID through the server and analyzed one at a time with the same YOLO, GIS, PCI/MPI proxy, and persistence pipeline. Mapillary API coordinates are used because downloaded thumbnails may omit EXIF. Original and annotated bytes plus source ID, creator, image URL, capture time, coordinate source, and license are stored in the active database. A unique source-image index prevents repeated analyses of the same Mapillary image from inflating road scores. Existing records remain readable after the additive schema update.
+
+Mapillary imagery is licensed under [CC BY-SA 4.0](https://help.mapillary.com/hc/en-us/articles/115001770409-CC-BY-SA-license-for-open-data). The picker, queue, saved images, and map popups retain source/creator/license attribution; annotated images are identified as modified by Road Resilience. Inspect the **capture date** before using a result for maintenance planning: Mapillary imagery is historical evidence and may not show today's road condition. Model accuracy on Mapillary imagery has not been validated locally; panoramas and small thumbnails may differ from the training data.
+
+Run `python -m backend.check_mapillary --download` to verify token access, Bengaluru search, and an in-memory image download without creating a database record. API credentials travel only to the Mapillary Graph host; image downloads accept trusted Mapillary/Meta CDN URLs returned by the provider, have timeouts and a 15 MB cap, and do not forward the API token to the CDN.
 
 PyTorch, Ultralytics, OpenCV, OCR, and the checkpoint make the backend a large Python function. A deployed build and public API health check passed; a live image inference request has not yet been tested. Vercel Functions limit request bodies to 4.5 MB, so larger image uploads need a direct-to-storage flow or another backend host. The local SQLite file and uploaded images are ignored by Git. Public image endpoints and upload APIs have no authentication, so restrict access before using sensitive imagery.
 

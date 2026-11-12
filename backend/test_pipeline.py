@@ -200,6 +200,51 @@ class ApiPipelineTests(unittest.TestCase):
                         self.assertEqual(client.delete(f"/api/detections/{result['id']}", headers=authorized).status_code, 200)
                         self.assertEqual(client.get("/api/dashboard/stats").json()["images_processed"], 0)
                         self.assertEqual(client.get("/api/detections").json()["total"], 0)
+                        # Mapillary thumbnails have no EXIF: API coordinates and attribution must survive inference.
+                        metadata = {
+                            "id": "123456789", "latitude": 12.973738429220642, "longitude": 77.6138913631439,
+                            "source_metadata": {
+                                "provider": "mapillary", "image_id": "123456789",
+                                "image_url": "https://www.mapillary.com/app/?pKey=123456789",
+                                "creator_username": "contributor", "creator_id": "123",
+                                "creator_url": "https://www.mapillary.com/app/user/contributor",
+                                "captured_at": 1600000000000, "coordinate_source": "computed_geometry",
+                                "license": "CC BY-SA 4.0", "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+                            },
+                        }
+                        box = Mock()
+                        box.xyxy = [Mock()]
+                        box.xyxy[0].tolist.return_value = [1.0, 1.0, 40.0, 40.0]
+                        box.cls, box.conf = [Mock()], [Mock()]
+                        box.cls[0].item.return_value = 4
+                        box.conf[0].item.return_value = 0.9
+                        detector = Mock(names={4: "D40_Pothole"})
+                        detector.predict.return_value = [Mock(boxes=[box])]
+                        with patch.object(main.mapillary_client, "download_image", return_value=(buffer.getvalue(), "image/jpeg", metadata)) as download, patch.object(main, "load_model", return_value=detector), patch.object(main, "extract_image_location", side_effect=AssertionError("Should use Mapillary coordinates")):
+                            imported = client.post("/api/mapillary/analyze", json={"image_id": "123456789"})
+                            self.assertEqual(imported.status_code, 200, imported.text)
+                            analysis = imported.json()
+                            self.assertEqual(analysis["location_source"], "mapillary")
+                            self.assertEqual(analysis["location_status"], "road_snapped")
+                            self.assertEqual(analysis["source_metadata"], metadata["source_metadata"])
+                            self.assertEqual(analysis["priority"], "Low")
+                            repeated = client.post("/api/mapillary/analyze", json={"image_id": "123456789"})
+                            self.assertEqual(repeated.status_code, 200, repeated.text)
+                            self.assertEqual(repeated.json()["id"], analysis["id"])
+                            self.assertTrue(repeated.json()["reused"])
+                            download.assert_called_once()
+                            observation = client.get("/api/observations").json()["records"][0]
+                            self.assertEqual(observation["source_metadata"], metadata["source_metadata"])
+                            with patch.object(main.mapillary_client, "get_image", return_value=metadata):
+                                self.assertEqual(client.post(f"/api/observations/{observation['id']}/recheck-location").status_code, 200)
+                            saved = client.get(f"/api/detections/{analysis['id']}").json()
+                            self.assertEqual(saved["source_type"], "mapillary")
+                            self.assertEqual(saved["latitude"], metadata["latitude"])
+                            self.assertEqual(client.get("/api/detections").json()["records"][0]["source_metadata"], metadata["source_metadata"])
+                            self.assertEqual(client.get("/api/dashboard").json()["history"][0]["source"], "mapillary_inference")
+                            self.assertEqual(len(client.get("/api/map").json()["features"]), 1)
+                            self.assertEqual(client.delete(f"/api/detections/{analysis['id']}", headers=authorized).status_code, 200)
+                            self.assertEqual(client.get("/api/map").json()["features"], [])
             finally:
                 main.UPLOAD_DIR, main.ANNOTATED_DIR = previous_upload, previous_annotated
                 engine.dispose()

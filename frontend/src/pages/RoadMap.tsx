@@ -8,6 +8,22 @@ import { apiFetch, type InspectionObservation, type PriorityMap } from "../api";
 
 type Coordinate = [number, number];
 
+function attributionLink(value: string | null | undefined, hosts: string[], fallback: string): string {
+  try {
+    const url = new URL(value ?? "");
+    if (url.protocol === "https:" && hosts.includes(url.hostname) && !url.username && !url.password) return url.href;
+  } catch { /* Use a canonical attribution URL when source metadata is incomplete. */ }
+  return fallback;
+}
+
+function MapillaryAttribution({ source }: { source: NonNullable<InspectionObservation["source_metadata"]> }) {
+  const imageUrl = attributionLink(source.image_url, ["mapillary.com", "www.mapillary.com"], `https://www.mapillary.com/app/?pKey=${encodeURIComponent(source.image_id)}`);
+  const creatorUrl = attributionLink(source.creator_url, ["mapillary.com", "www.mapillary.com"], imageUrl);
+  const licenseUrl = attributionLink(source.license_url, ["creativecommons.org", "www.creativecommons.org"], "https://creativecommons.org/licenses/by-sa/4.0/");
+  const captureDate = source.captured_at == null ? null : new Date(source.captured_at);
+  return <p>Photo: <a href={imageUrl} target="_blank" rel="noopener noreferrer">Mapillary #{source.image_id}</a><br />Creator: <a href={creatorUrl} target="_blank" rel="noopener noreferrer">{source.creator_username ?? source.creator_id ?? "View photo credits"}</a>{" · "}<a href={licenseUrl} target="_blank" rel="noopener noreferrer">{source.license}</a><br />Captured: {captureDate && !Number.isNaN(captureDate.getTime()) ? captureDate.toLocaleString() : "Not supplied"}</p>;
+}
+
 function FitToResults({ coordinates }: { coordinates: Coordinate[] }) {
   const map = useMap();
   const previousBounds = useRef("");
@@ -54,10 +70,10 @@ function RoadMap() {
     <div className="map-summary-bar"><span className="map-location"><MapPinned size={17} />Bengaluru road coverage</span><span><strong>{matched}</strong> scored road segments</span><span><strong>{locatedObservations.length}</strong> located images</span><span className="status-badge ready">{loading ? "Loading map data…" : "Updates every 30 seconds"}</span></div>
     <section className="full-map-panel" aria-label="Road observations map"><MapContainer center={[12.9716, 77.5946]} zoom={11} scrollWheelZoom className="leaflet-map"><TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" /><FitToResults coordinates={coordinates} />
       {layer?.features.map((feature) => <Polyline key={feature.id} positions={feature.geometry.coordinates.map(([lon, lat]): Coordinate => [lat, lon])} pathOptions={{ color: feature.properties.color, weight: 6, opacity: 0.85 }}><Popup><strong>{feature.properties.road_name ?? feature.id}</strong><br />Segment: {feature.id}<br />Road class: {feature.properties.road_type ?? "Unknown"}<br />PCI proxy: {feature.properties.pci_score?.toFixed(1) ?? "Unassessed"}<br />MPI proxy: {feature.properties.mpi_score?.toFixed(1) ?? "Unassessed"}<br />Priority: {feature.properties.priority ?? "Unassessed"}</Popup></Polyline>)}
-      {locatedObservations.map((item) => <CircleMarker key={item.id} center={[item.latitude!, item.longitude!]} radius={6} pathOptions={{ color: "#347ca4", fillColor: "#347ca4", fillOpacity: 0.85, weight: 2 }}><Popup><strong>{item.filename}</strong><br />{item.damage_types.map((value) => value.replace(/^D\d+_/, "").replaceAll("_", " ")).join(", ") || "No scored damage"}<br />GPS: {item.latitude?.toFixed(6)}, {item.longitude?.toFixed(6)}<br />Source: {item.location_source === "image_overlay" ? "Image coordinate stamp" : item.location_source === "manual" ? "Previously entered" : "EXIF metadata"}<br />Image priority proxy: {item.priority ?? "Unassessed"}<br />{item.road_id ? `Matched road: ${item.road_id}` : "Outside available road geometry"}</Popup></CircleMarker>)}
+      {locatedObservations.map((item) => <CircleMarker key={item.id} center={[item.latitude!, item.longitude!]} radius={6} pathOptions={{ color: "#347ca4", fillColor: "#347ca4", fillOpacity: 0.85, weight: 2 }}><Popup><strong>{item.filename}</strong><br />{item.damage_types.map((value) => value.replace(/^D\d+_/, "").replaceAll("_", " ")).join(", ") || "No scored damage"}<br />GPS: {item.latitude?.toFixed(6)}, {item.longitude?.toFixed(6)}<br />Source: {item.location_source === "mapillary" ? "Mapillary coordinates" : item.location_source === "image_overlay" ? "Image coordinate stamp" : item.location_source === "manual" ? "Previously entered" : "EXIF metadata"}<br />Image priority proxy: {item.priority ?? "Unassessed"}<br />{item.road_id ? `Matched road: ${item.road_id}` : "Outside available road geometry"}{item.source_metadata?.provider === "mapillary" && <MapillaryAttribution source={item.source_metadata} />}</Popup></CircleMarker>)}
     </MapContainer></section>
     <div className="map-legend"><div><span className="legend-line" style={{ backgroundColor: "#EF4444" }} /><span>High priority</span></div><div><span className="legend-line" style={{ backgroundColor: "#F59E0B" }} /><span>Medium priority</span></div><div><span className="legend-line" style={{ backgroundColor: "#10B981" }} /><span>Low priority</span></div><div><span className="legend-line" style={{ backgroundColor: "#347ca4" }} /><span>Image location</span></div></div>
-    {!loading && !error && !locatedObservations.length && <div className="data-note"><MapPinned size={18} /><span>No located images yet. Analyze an image with EXIF GPS or a readable coordinate stamp to place it on the map.</span><Link className="panel-action" to="/ai-analysis">Analyze images<ArrowUpRight size={15} /></Link></div>}
+    {!loading && !error && !locatedObservations.length && <div className="data-note"><MapPinned size={18} /><span>No located images yet. Analyze a Mapillary image or a photo with EXIF GPS or a readable coordinate stamp to place it on the map.</span><Link className="panel-action" to="/ai-analysis">Analyze images<ArrowUpRight size={15} /></Link></div>}
     <details className="data-disclosure"><summary>Reading the map</summary><p>Blue points mark image coordinates. Colored road lines show visual priority proxies for matched damage observations. Images outside Bengaluru road coverage can still appear as points; a road line is scored only when a match is within 30 m of the available geometry.</p><p>The map includes up to 200 recent image observations. Select a point or road line to inspect its details.</p></details>
   </div>;
 }

@@ -3,7 +3,8 @@ import type { ChangeEvent } from "react";
 import { Link } from "react-router-dom";
 import { AlertTriangle, ArrowRight, BrainCircuit, CheckCircle2, ImagePlus, Images, MapPin, Upload, X } from "lucide-react";
 import { API_BASE, apiFetch, sampleUrl } from "../api";
-import type { Detection, ModelInfo } from "../api";
+import type { Detection, MapillaryImage, ModelInfo, SourceMetadata } from "../api";
+import MapillaryPicker, { MapillaryImageAttribution } from "../components/MapillaryPicker";
 import "./AnalysisWorkspace.css";
 
 type AnalysisResult = {
@@ -16,6 +17,9 @@ type AnalysisResult = {
   latitude: number | null;
   longitude: number | null;
   location_source: string | null;
+  source_type?: string;
+  source_image_id?: string | null;
+  source_metadata?: SourceMetadata | null;
   road_id: string | null;
   road_name: string | null;
   snap_distance_m: number | null;
@@ -37,6 +41,7 @@ type BulkItem = {
   id: string;
   file?: File;
   driveLink?: string;
+  mapillaryImage?: MapillaryImage;
   signature: string;
   displayName: string;
   previewUrl?: string;
@@ -45,6 +50,7 @@ type BulkItem = {
   error?: string;
 };
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
+type BulkSource = "files" | "folder" | "drive" | "mapillary";
 
 function imageContentType(file: File): string | null {
   if (file.type.startsWith("image/")) return file.type;
@@ -70,7 +76,8 @@ function AIDamageAnalysis() {
   const [bulkNotice, setBulkNotice] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [addingDrive, setAddingDrive] = useState(false);
-  const [bulkSource, setBulkSource] = useState<"files" | "folder" | "drive">("files");
+  const [bulkSource, setBulkSource] = useState<BulkSource>("files");
+  const [selectedMapillary, setSelectedMapillary] = useState<MapillaryImage[]>([]);
   const [driveLink, setDriveLink] = useState("");
   const [stopAfterCurrent, setStopAfterCurrent] = useState(false);
   const stopBulkRef = useRef(false);
@@ -218,16 +225,29 @@ function AIDamageAnalysis() {
   };
 
   const removeBulkItem = (item: BulkItem) => {
-    if (item.previewUrl) { URL.revokeObjectURL(item.previewUrl); bulkPreviewUrls.current.delete(item.previewUrl); }
+    if (item.previewUrl && bulkPreviewUrls.current.has(item.previewUrl)) { URL.revokeObjectURL(item.previewUrl); bulkPreviewUrls.current.delete(item.previewUrl); }
     setBulkQueue((current) => current.filter((entry) => entry.id !== item.id));
   };
 
   const clearBulkQueue = () => {
     for (const item of bulkQueue) {
-      if (item.previewUrl) { URL.revokeObjectURL(item.previewUrl); bulkPreviewUrls.current.delete(item.previewUrl); }
+      if (item.previewUrl && bulkPreviewUrls.current.has(item.previewUrl)) { URL.revokeObjectURL(item.previewUrl); bulkPreviewUrls.current.delete(item.previewUrl); }
     }
     setBulkQueue([]);
     setBulkNotice(null);
+  };
+
+  const addMapillaryImages = () => {
+    const existing = new Set(bulkQueue.map((item) => item.signature));
+    const additions: BulkItem[] = selectedMapillary.flatMap((image) => {
+      const signature = `mapillary:${image.id}`;
+      if (existing.has(signature)) return [];
+      existing.add(signature);
+      return [{ id: crypto.randomUUID(), mapillaryImage: image, signature, displayName: `mapillary-${image.id}.jpg`, previewUrl: image.thumbnail_url, status: "queued" as const }];
+    });
+    setBulkQueue((current) => [...current, ...additions]);
+    setBulkNotice(`${additions.length} Mapillary image${additions.length === 1 ? "" : "s"} added to the queue${selectedMapillary.length > additions.length ? `; ${selectedMapillary.length - additions.length} already queued` : ""}.`);
+    setSelectedMapillary([]);
   };
 
   const processBulk = async () => {
@@ -243,7 +263,12 @@ function AIDamageAnalysis() {
         setBulkQueue((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: "processing" } : entry));
         try {
           let result: BulkAnalysisResult;
-          if (item.driveLink) {
+          if (item.mapillaryImage) {
+            result = await apiFetch<BulkAnalysisResult>("/api/mapillary/analyze", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ image_id: item.mapillaryImage.id }),
+            });
+          } else if (item.driveLink) {
             result = await apiFetch<BulkAnalysisResult>("/api/drive/analyze", {
               method: "POST", headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ link: item.driveLink, name: item.displayName === "Drive image" ? undefined : item.displayName }),
@@ -328,14 +353,14 @@ function AIDamageAnalysis() {
         <div className="panel-header"><div><p className="panel-kicker">BULK ANALYSIS</p><h2>Build your image queue</h2></div><span className="analysis-format-chip">One image at a time</span></div>
         <p className="analysis-panel-description">Choose a source and add images to the same queue. Each completed result is saved to History.</p>
         <div className="analysis-controls">
-          <select aria-label="Image source" value={bulkSource} onChange={(event) => setBulkSource(event.target.value as "files" | "folder" | "drive")} disabled={busy || bulkBusy || addingDrive}>
-            <option value="files">Images on device</option><option value="folder">Folder on device</option><option value="drive">Google Drive link</option>
+          <select aria-label="Image source" value={bulkSource} onChange={(event) => setBulkSource(event.target.value as BulkSource)} disabled={busy || bulkBusy || addingDrive}>
+            <option value="files">Images on device</option><option value="folder">Folder on device</option><option value="drive">Google Drive link</option><option value="mapillary">Mapillary imagery</option>
           </select>
           {bulkSource === "drive" && <input className="drive-link-input" type="url" aria-label="Public Google Drive file or folder link" placeholder="Paste public Drive file or folder link" value={driveLink} onChange={(event) => setDriveLink(event.target.value)} disabled={busy || bulkBusy || addingDrive} />}
           <input ref={filesInput} type="file" accept="image/*" multiple onChange={chooseBulkFiles} disabled={busy || bulkBusy || addingDrive} hidden />
           <input ref={(input) => { folderInput.current = input; if (input) input.setAttribute("webkitdirectory", ""); }} type="file" multiple onChange={chooseBulkFiles} disabled={busy || bulkBusy || addingDrive} hidden />
-          <button className="analysis-upload-button" type="button" onClick={() => bulkSource === "drive" ? void addDriveLink() : (bulkSource === "folder" ? folderInput : filesInput).current?.click()} disabled={busy || bulkBusy || addingDrive || (bulkSource === "drive" && !driveLink.trim())}>
-            <Upload size={18} />{addingDrive ? "Adding…" : "Add to queue"}
+          <button className="analysis-upload-button" type="button" onClick={() => bulkSource === "mapillary" ? addMapillaryImages() : bulkSource === "drive" ? void addDriveLink() : (bulkSource === "folder" ? folderInput : filesInput).current?.click()} disabled={busy || bulkBusy || addingDrive || (bulkSource === "drive" && !driveLink.trim()) || (bulkSource === "mapillary" && selectedMapillary.length === 0)}>
+            <Upload size={18} />{addingDrive ? "Adding…" : bulkSource === "mapillary" && selectedMapillary.length ? `Add ${selectedMapillary.length} to queue` : "Add to queue"}
           </button>
           <button className="analysis-run-button" type="button" onClick={processBulk} disabled={busy || bulkBusy || addingDrive || !bulkPending}>
             <BrainCircuit size={18} />{bulkBusy ? "Processing queue…" : bulkFinished ? "Process remaining" : "Run analysis"}
@@ -344,7 +369,8 @@ function AIDamageAnalysis() {
         </div>
         {bulkSource === "drive" && <p className="bulk-notice">Use an image or folder shared as “Anyone with the link.” Folder imports must be enabled by your administrator.</p>}
         {bulkNotice && <p className="bulk-notice" role="status">{bulkNotice}</p>}
-        {bulkQueue.length === 0 && <div className="analysis-queue-empty"><Images size={30} /><h3>Your queue is ready for images</h3><p>Add local images, a folder, or a shared Drive link. You can combine sources before running analysis.</p></div>}
+        {bulkSource === "mapillary" && <MapillaryPicker selected={selectedMapillary} onSelectionChange={setSelectedMapillary} queuedIds={bulkQueue.flatMap((item) => item.mapillaryImage ? [item.mapillaryImage.id] : [])} disabled={busy || bulkBusy || addingDrive} />}
+        {bulkQueue.length === 0 && <div className="analysis-queue-empty"><Images size={30} /><h3>Your queue is ready for images</h3><p>Add local images, a folder, a shared Drive link, or Mapillary imagery. You can combine sources before running analysis.</p></div>}
         {bulkQueue.length > 0 && <>
           <div className="bulk-queue-heading"><div><strong>Processing queue <span className="queue-total">{bulkQueue.length}</span></strong><span>{completeCount} complete · {failedCount} failed · {bulkQueue.length - bulkFinished} remaining</span></div><button className="panel-action" type="button" onClick={clearBulkQueue} disabled={bulkBusy || addingDrive}>Clear queue</button></div>
           <progress className="bulk-progress" value={bulkFinished} max={bulkQueue.length} aria-label="Bulk analysis progress" />
@@ -352,7 +378,7 @@ function AIDamageAnalysis() {
             {bulkQueue.map((item) => <li key={item.id} className="bulk-result-row">
               <div className="bulk-row-main">
                 {item.previewUrl ? <img src={item.previewUrl} alt={`Original ${item.displayName}`} loading="lazy" /> : <span className="drive-queue-icon">Drive</span>}
-                <div className="bulk-row-name"><strong>{item.displayName}</strong><span>{item.file ? `${(item.file.size / 1024 / 1024).toFixed(2)} MB` : "Google Drive"}</span></div>
+                <div className="bulk-row-name"><strong>{item.displayName}</strong><span>{item.file ? `${(item.file.size / 1024 / 1024).toFixed(2)} MB` : item.mapillaryImage ? "Mapillary imagery" : "Google Drive"}</span>{item.mapillaryImage && <MapillaryImageAttribution image={item.mapillaryImage} />}</div>
                 <span className={`bulk-status ${item.status}`}>{item.status}</span>
                 <button className="panel-action queue-remove" type="button" onClick={() => removeBulkItem(item)} disabled={bulkBusy || addingDrive} aria-label={`Remove ${item.displayName} from queue`}><X size={16} /></button>
               </div>
@@ -360,7 +386,7 @@ function AIDamageAnalysis() {
               {item.error && <p className="bulk-error bulk-row-message">{item.error}</p>}
               {item.result && <div className="bulk-result-detail">
                 <a href={`${API_BASE}${item.result.annotated_image_url}`} target="_blank" rel="noreferrer"><img src={`${API_BASE}${item.result.annotated_image_url}`} alt={`Annotated result for ${item.displayName}`} loading="lazy" /></a>
-                <div><strong>{item.result.detections.length} detection{item.result.detections.length === 1 ? "" : "s"}</strong><p>{item.result.detections.length ? item.result.detections.map((detection) => `${detection.class_name.replaceAll("_", " ")} ${(detection.confidence * 100).toFixed(1)}%`).join(", ") : "No damage detected at the configured threshold."}</p><p>{item.result.latitude == null ? "No readable GPS" : item.result.road_id ? `Road ${item.result.road_id}` : "GPS outside road coverage"} · PCI {item.result.pci_proxy?.toFixed(1) ?? "—"} · MPI {item.result.mpi_proxy?.toFixed(1) ?? "—"} · {item.result.priority ?? "Unassessed"}</p><Link to={`/history/${item.result.id}`}>View full analysis</Link></div>
+                <div><strong>{item.result.detections.length} detection{item.result.detections.length === 1 ? "" : "s"}</strong><p>{item.result.detections.length ? item.result.detections.map((detection) => `${detection.class_name.replaceAll("_", " ")} ${(detection.confidence * 100).toFixed(1)}%`).join(", ") : "No damage detected at the configured threshold."}</p><p>{item.result.latitude == null ? "No readable GPS" : item.result.road_id ? `Road ${item.result.road_id}` : "GPS outside road coverage"} · PCI {item.result.pci_proxy?.toFixed(1) ?? "—"} · MPI {item.result.mpi_proxy?.toFixed(1) ?? "—"} · {item.result.priority ?? "Unassessed"}</p>{item.mapillaryImage && <MapillaryImageAttribution image={item.mapillaryImage} annotated />}<Link to={`/history/${item.result.id}`}>View full analysis</Link></div>
               </div>}
             </li>)}
           </ol>

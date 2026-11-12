@@ -6,7 +6,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, LargeBinary, String, Text, create_engine, delete, func, inspect, select, text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, LargeBinary, String, Text, create_engine, delete, func, inspect, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 
@@ -29,6 +29,7 @@ class Base(DeclarativeBase):
 
 class DetectionRecord(Base):
     __tablename__ = "detection_records"
+    __table_args__ = (Index("uq_detection_source_image", "source_type", "source_image_id", unique=True),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -48,6 +49,9 @@ class DetectionRecord(Base):
     snapped_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     location_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
     location_source: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    source_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    source_image_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    source_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     pci_proxy: Mapped[float | None] = mapped_column(Float, nullable=True)
     mpi_proxy: Mapped[float | None] = mapped_column(Float, nullable=True)
     priority: Mapped[str | None] = mapped_column(String(10), nullable=True)
@@ -140,16 +144,23 @@ def initialize_database() -> None:
         "snapped_latitude": "FLOAT", "snapped_longitude": "FLOAT",
         "location_status": "VARCHAR(40)", "pci_proxy": "FLOAT",
         "location_source": "VARCHAR(40)",
+        "source_type": "VARCHAR(40)", "source_image_id": "VARCHAR(100)", "source_metadata": "JSON",
         "mpi_proxy": "FLOAT", "priority": "VARCHAR(10)",
         "scoring_basis": "VARCHAR(255)",
     }
     observation_existing = {column["name"] for column in inspect(engine).get_columns("observations")}
     with engine.begin() as connection:
+        postgres = DATABASE_URL.startswith("postgresql")
+        if postgres:
+            # Serialize additive upgrades across concurrent serverless cold starts.
+            connection.execute(text("SELECT pg_advisory_xact_lock(631684295)"))
+        exists_guard = " IF NOT EXISTS" if postgres else ""
         for name, column_type in legacy_columns.items():
             if name not in legacy_existing:
-                connection.execute(text(f"ALTER TABLE detection_records ADD COLUMN {name} {column_type}"))
+                connection.execute(text(f"ALTER TABLE detection_records ADD COLUMN{exists_guard} {name} {column_type}"))
         if "location_source" not in observation_existing:
-            connection.execute(text("ALTER TABLE observations ADD COLUMN location_source VARCHAR(40)"))
+            connection.execute(text(f"ALTER TABLE observations ADD COLUMN{exists_guard} location_source VARCHAR(40)"))
+        connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_detection_source_image ON detection_records (source_type, source_image_id)"))
 
 
 def get_session() -> Session:

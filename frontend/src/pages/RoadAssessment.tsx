@@ -6,6 +6,14 @@ import { apiFetch, type InspectionObservation } from "../api";
 type Priority = "High" | "Medium" | "Low";
 const damageLabel = (value: string) => value.replace(/^D\d+_/, "").replaceAll("_", " ");
 
+function mapillarySourceLink(item: InspectionObservation): string {
+  try {
+    const url = new URL(item.source_metadata?.image_url ?? "");
+    if (url.protocol === "https:" && ["mapillary.com", "www.mapillary.com"].includes(url.hostname) && !url.username && !url.password) return url.href;
+  } catch { /* Use the canonical source page for incomplete metadata. */ }
+  return `https://www.mapillary.com/app/?pKey=${encodeURIComponent(item.source_metadata?.image_id ?? "")}`;
+}
+
 function RoadAssessment() {
   const [records, setRecords] = useState<InspectionObservation[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -59,17 +67,17 @@ function RoadAssessment() {
       {locationError && <div className="map-notice" role="alert"><Info size={18} /><span>{locationError}</span></div>}
       {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading road assessments…</div> : <>
         <div className="table-wrapper"><table className="metrics-table"><thead><tr><th>Image</th><th>Road segment</th><th>Location</th><th>Damage</th><th>Confidence</th><th>PCI proxy</th><th>MPI proxy</th><th>Priority</th><th>Action</th></tr></thead><tbody>{filteredRecords.map((item) => <tr key={item.id}>
-          <td><strong>{item.filename}</strong><br /><small>Observation #{item.id}</small></td>
+          <td><strong>{item.filename}</strong><br /><small>Observation #{item.id}{item.source_metadata?.provider === "mapillary" ? " · Mapillary" : ""}</small></td>
           <td>{item.road_id ?? (item.geolocated ? "Outside road coverage" : "No GPS")}</td>
-          <td>{item.latitude == null ? <span className="muted-text">Not located</span> : <>{item.latitude.toFixed(6)}, {item.longitude?.toFixed(6)}<br /><small>{item.location_source === "image_overlay" ? "Image stamp" : item.location_source === "manual" ? "Previously entered" : "EXIF GPS"}</small></>}</td>
+          <td>{item.latitude == null ? <span className="muted-text">Not located</span> : <>{item.latitude.toFixed(6)}, {item.longitude?.toFixed(6)}<br /><small>{item.location_source === "mapillary" ? "Mapillary coordinates" : item.location_source === "image_overlay" ? "Image stamp" : item.location_source === "manual" ? "Previously entered" : "EXIF GPS"}</small></>}</td>
           <td>{item.damage_types.map(damageLabel).join(", ") || "None detected"}</td><td>{item.max_confidence == null ? "—" : `${(item.max_confidence * 100).toFixed(1)}%`}</td><td>{item.pci_score?.toFixed(1) ?? "—"}</td><td>{item.mpi_score?.toFixed(1) ?? "—"}</td>
           <td>{item.priority ? <span className={`priority-pill ${item.priority.toLowerCase()}`}>{item.priority}</span> : <span className="muted-text">Unassessed</span>}</td>
-          <td><button className="panel-action" type="button" onClick={() => void recheckLocation(item)} disabled={checkingId != null}>{checkingId === item.id ? "Reading GPS…" : "Recheck GPS"}</button></td>
+          <td>{item.source_metadata?.provider === "mapillary" ? <a className="panel-action" href={mapillarySourceLink(item)} target="_blank" rel="noopener noreferrer">View source<ArrowUpRight size={15} /></a> : <button className="panel-action" type="button" onClick={() => void recheckLocation(item)} disabled={checkingId != null}>{checkingId === item.id ? "Reading GPS…" : "Recheck GPS"}</button>}</td>
         </tr>)}</tbody></table></div>
         {!filteredRecords.length && <div className="empty-state"><ClipboardCheck size={30} /><h3>{hasFilters ? "No assessments match your filters" : "Your review queue is clear"}</h3><p>{hasFilters ? "Try another image name, road, damage type or priority." : "Analyze road images to start building a maintenance review queue."}</p>{hasFilters ? <button className="button-secondary" type="button" onClick={() => { setQuery(""); setPriority("All"); }}>Clear filters</button> : <Link className="button-primary" to="/ai-analysis">Analyze images<ArrowUpRight size={16} /></Link>}</div>}
       </>}
     </section>
-    <details className="data-disclosure"><summary>About GPS matches and condition scores</summary><p>Coordinates are read from image metadata or a visible coordinate stamp. Located images appear on the map; a scored road segment needs a match within 30 m of the available geometry.</p><p>PCI and MPI are visual assessment proxies based on detected damage. Use them to guide a field inspection, rather than as a certified pavement condition survey. This queue shows up to 200 recent observations.</p></details>
+    <details className="data-disclosure"><summary>About GPS matches and condition scores</summary><p>Coordinates come from Mapillary metadata, image EXIF metadata, or a visible coordinate stamp. Located images appear on the map; a scored road segment needs a match within 30 m of the available geometry.</p><p>PCI and MPI are visual assessment proxies based on detected damage. Use them to guide a field inspection, rather than as a certified pavement condition survey. This queue shows up to 200 recent observations.</p></details>
   </div>;
 }
 

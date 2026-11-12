@@ -22,6 +22,31 @@ export type Detection = {
   bbox: number[];
 };
 
+export type SourceMetadata = {
+  provider: "mapillary";
+  image_id: string;
+  image_url: string;
+  creator_username: string | null;
+  creator_id: string | null;
+  creator_url: string | null;
+  captured_at: number | null;
+  license: "CC BY-SA 4.0";
+  license_url: string;
+  coordinate_source?: "computed_geometry" | "geometry";
+};
+
+export type MapillaryImage = {
+  id: string;
+  latitude: number;
+  longitude: number;
+  captured_at: number | null;
+  creator_username: string | null;
+  creator_id: string | null;
+  thumbnail_url: string;
+  image_url: string;
+  is_pano: boolean;
+};
+
 export type SavedAnalysisSummary = {
   id: number;
   filename: string;
@@ -35,6 +60,9 @@ export type SavedAnalysisSummary = {
   road_name: string | null;
   location_status: string;
   location_source: string | null;
+  source_type?: string;
+  source_image_id?: string | null;
+  source_metadata?: SourceMetadata | null;
   pci_proxy: number | null;
   mpi_proxy: number | null;
   priority: "High" | "Medium" | "Low" | null;
@@ -158,6 +186,9 @@ export type InspectionObservation = {
   geolocated: boolean;
   location_status: string;
   location_source: string | null;
+  source_type?: string;
+  source_image_id?: string | null;
+  source_metadata?: SourceMetadata | null;
   road_id: string | null;
   pci_score: number | null;
   mpi_score: number | null;

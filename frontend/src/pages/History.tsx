@@ -14,8 +14,29 @@ function dateLabel(value: string): string {
 
 function locationLabel(item: SavedAnalysisSummary): string {
   if (item.latitude == null || item.longitude == null) return "No readable GPS";
-  const source = item.location_source === "image_overlay" ? "image stamp" : item.location_source === "exif" ? "EXIF" : "saved location";
+  const source = item.location_source === "mapillary" ? "Mapillary coordinates" : item.location_source === "image_overlay" ? "image stamp" : item.location_source === "exif" ? "EXIF" : "saved location";
   return `${item.latitude.toFixed(6)}, ${item.longitude.toFixed(6)} (${source})`;
+}
+
+function captureLabel(value: number | null): string {
+  if (value == null) return "Capture date unavailable";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Capture date unavailable" : `Captured ${date.toLocaleString()}`;
+}
+
+function attributionLink(value: string | null | undefined, hosts: string[], fallback: string): string {
+  try {
+    const url = new URL(value ?? "");
+    if (url.protocol === "https:" && hosts.includes(url.hostname) && !url.username && !url.password) return url.href;
+  } catch { /* Fall back to a canonical public attribution link. */ }
+  return fallback;
+}
+
+function SourceAttribution({ source, annotated = false }: { source: NonNullable<SavedAnalysisSummary["source_metadata"]>; annotated?: boolean }) {
+  const imageUrl = attributionLink(source.image_url, ["mapillary.com", "www.mapillary.com"], `https://www.mapillary.com/app/?pKey=${encodeURIComponent(source.image_id)}`);
+  const creatorUrl = attributionLink(source.creator_url, ["mapillary.com", "www.mapillary.com"], imageUrl);
+  const licenseUrl = attributionLink(source.license_url, ["creativecommons.org", "www.creativecommons.org"], "https://creativecommons.org/licenses/by-sa/4.0/");
+  return <p className="history-basis">Photo: <a className="table-record-link" href={imageUrl} target="_blank" rel="noopener noreferrer">Mapillary #{source.image_id}</a>{" · "}Creator: <a className="table-record-link" href={creatorUrl} target="_blank" rel="noopener noreferrer">{source.creator_username ?? source.creator_id ?? "View photo credits"}</a>{" · "}<a className="table-record-link" href={licenseUrl} target="_blank" rel="noopener noreferrer">{source.license}</a><br />{captureLabel(source.captured_at)}. {annotated ? "Annotations added by Road Resilience." : "This is the source image; its capture date may differ from the analysis date."}</p>;
 }
 
 function HistoryList() {
@@ -53,7 +74,7 @@ function HistoryList() {
       {!loading && !error && records.length > 0 && <div className="history-list">{records.map((item) =>
         <Link to={`/history/${item.id}`} className="history-entry" key={item.id}>
           <img src={`${API_BASE}${item.annotated_image_url}`} alt={`Annotated result for ${item.filename}`} loading="lazy" />
-          <div className="history-entry-main"><strong>{item.filename}</strong><span>{dateLabel(item.created_at)} · {item.detection_count} detection{item.detection_count === 1 ? "" : "s"}</span><span className="history-road-label">{item.road_name ?? item.road_id ?? (item.latitude == null ? "No readable GPS" : "Outside local road coverage")}</span></div>
+          <div className="history-entry-main"><strong>{item.filename}</strong><span>Analyzed {dateLabel(item.created_at)} · {item.detection_count} detection{item.detection_count === 1 ? "" : "s"}</span>{item.source_metadata?.provider === "mapillary" && <span>Mapillary · {captureLabel(item.source_metadata.captured_at)}</span>}<span className="history-road-label">{item.road_name ?? item.road_id ?? (item.latitude == null ? "No readable GPS" : "Outside local road coverage")}</span></div>
           <div className="history-entry-side">{item.priority ? <span className={`priority-pill ${item.priority.toLowerCase()}`}>{item.priority}</span> : <span>Unassessed</span>}<span>View analysis <ChevronRight size={16} /></span></div>
         </Link>,
       )}</div>}
@@ -104,9 +125,9 @@ function HistoryDetail({ recordId }: { recordId: string }) {
     {record && <>
       {confirmingDelete && <section className="panel history-delete-panel" aria-label="Confirm deletion"><div className="history-delete-heading"><span><Trash2 size={20} /></span><div><h2>Delete this analysis?</h2><p>Analysis #{record.id} · This action cannot be undone.</p></div></div><p>This removes the saved result, original and annotated images, and its road assessment from the live database.</p><form onSubmit={removeAnalysis}><label htmlFor="delete-key">Enter your deletion key</label><input id="delete-key" type="password" autoComplete="off" placeholder="Deletion key" aria-describedby="delete-key-help" value={deleteKey} onChange={(event) => setDeleteKey(event.target.value)} required disabled={deleting} autoFocus /><span className="history-delete-help" id="delete-key-help">Only an administrator with the deletion key can remove a saved analysis.</span><div className="history-delete-actions"><button type="button" onClick={() => { setConfirmingDelete(false); setDeleteKey(""); setDeleteError(null); }} disabled={deleting}>Keep analysis</button><button className="history-delete-confirm" type="submit" disabled={deleting || !deleteKey.trim()}><Trash2 size={16} />{deleting ? "Deleting…" : "Permanently delete"}</button></div></form>{deleteError && <p className="history-delete-error" role="alert">{deleteError}</p>}</section>}
       <section className="panel history-detail-summary"><div className="panel-header"><div><p className="panel-kicker">ANALYSIS #{record.id}</p><h2>{record.filename}</h2></div>{record.priority ? <span className={`priority-pill ${record.priority.toLowerCase()}`}>{record.priority}</span> : <span className="muted-text">Unassessed</span>}</div>
-        <div className="history-facts"><div><span>Analyzed</span><strong>{dateLabel(record.created_at)}</strong></div><div><span>Detections</span><strong>{record.detection_count}</strong></div><div><span>Location</span><strong>{locationLabel(record)}</strong></div><div><span>Road segment</span><strong>{record.road_name ?? record.road_id ?? (record.latitude == null ? "No GPS" : "Outside local coverage")}</strong></div><div><span>PCI proxy</span><strong>{record.pci_proxy?.toFixed(1) ?? "Unassessed"}</strong></div><div><span>MPI proxy</span><strong>{record.mpi_proxy?.toFixed(1) ?? "Unassessed"}</strong></div></div>
+        <div className="history-facts"><div><span>Analyzed</span><strong>{dateLabel(record.created_at)}</strong></div>{record.source_metadata?.provider === "mapillary" && <div><span>Image captured</span><strong>{captureLabel(record.source_metadata.captured_at).replace(/^Captured /, "")}</strong></div>}<div><span>Detections</span><strong>{record.detection_count}</strong></div><div><span>Location</span><strong>{locationLabel(record)}</strong></div><div><span>Road segment</span><strong>{record.road_name ?? record.road_id ?? (record.latitude == null ? "No GPS" : "Outside local coverage")}</strong></div><div><span>PCI proxy</span><strong>{record.pci_proxy?.toFixed(1) ?? "Unassessed"}</strong></div><div><span>MPI proxy</span><strong>{record.mpi_proxy?.toFixed(1) ?? "Unassessed"}</strong></div></div>
       </section>
-      <section className="history-images"><div className="panel"><div className="panel-header"><div><p className="panel-kicker">UPLOADED IMAGE</p><h2>Original</h2></div></div><a href={`${API_BASE}/api/detections/${record.id}/original`} target="_blank" rel="noreferrer"><img src={`${API_BASE}/api/detections/${record.id}/original`} alt={`Original upload ${record.filename}`} /></a></div><div className="panel"><div className="panel-header"><div><p className="panel-kicker">MODEL OUTPUT</p><h2>Annotated</h2></div></div><a href={`${API_BASE}${record.annotated_image_url}`} target="_blank" rel="noreferrer"><img src={`${API_BASE}${record.annotated_image_url}`} alt={`Annotated result ${record.filename}`} /></a></div></section>
+      <section className="history-images"><div className="panel"><div className="panel-header"><div><p className="panel-kicker">{record.source_metadata?.provider === "mapillary" ? "MAPILLARY IMAGE" : "UPLOADED IMAGE"}</p><h2>Original</h2></div></div><a href={`${API_BASE}/api/detections/${record.id}/original`} target="_blank" rel="noreferrer"><img src={`${API_BASE}/api/detections/${record.id}/original`} alt={`Original image ${record.filename}`} /></a>{record.source_metadata?.provider === "mapillary" && <SourceAttribution source={record.source_metadata} />}</div><div className="panel"><div className="panel-header"><div><p className="panel-kicker">MODEL OUTPUT</p><h2>Annotated</h2></div></div><a href={`${API_BASE}${record.annotated_image_url}`} target="_blank" rel="noreferrer"><img src={`${API_BASE}${record.annotated_image_url}`} alt={`Annotated result ${record.filename}`} /></a>{record.source_metadata?.provider === "mapillary" && <SourceAttribution source={record.source_metadata} annotated />}</div></section>
       <section className="panel history-detections"><div className="panel-header"><div><p className="panel-kicker">MODEL FINDINGS</p><h2>Detected damage</h2></div><span className="muted-text">{record.inference_ms.toFixed(0)} ms inference</span></div>
         {record.detections.length ? <div className="table-wrapper"><table className="metrics-table"><thead><tr><th>Damage class</th><th>Confidence</th><th>Bounding box (x1, y1, x2, y2)</th></tr></thead><tbody>{record.detections.map((item, index) => <tr key={`${item.class_id}-${index}`}><td>{item.class_name}</td><td>{(item.confidence * 100).toFixed(1)}%</td><td>{item.bbox.join(", ")}</td></tr>)}</tbody></table></div> : <p className="history-message">The model recorded no detections for this image.</p>}
         {record.scoring_basis && <p className="history-basis">{record.scoring_basis}</p>}

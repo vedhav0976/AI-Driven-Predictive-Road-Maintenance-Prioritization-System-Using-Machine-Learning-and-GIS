@@ -1,0 +1,62 @@
+.mapillary-picker { margin: 0 24px 24px; border: 1px solid var(--border, #dfe6e3); border-radius: 12px; background: #fbfdfb; overflow: hidden; }
+.mapillary-picker-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 21px 22px; border-bottom: 1px solid var(--border, #dfe6e3); }
+.mapillary-picker-heading h3 { margin: 0; font-size: 17px; color: var(--ink, #192f38); }
+.mapillary-picker-heading p:last-child { margin: 8px 0 0; font-size: 12px; line-height: 1.7; color: var(--muted, #647780); }
+.mapillary-picker-heading > a { display: inline-flex; align-items: center; flex-shrink: 0; gap: 6px; padding-top: 4px; color: var(--accent-dark, #0d6553); font-size: 11px; }
+.mapillary-search-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 22px; }
+.mapillary-search-toolbar p { margin: 0; color: var(--muted, #647780); font-size: 12px; line-height: 1.6; }
+.mapillary-search-toolbar button { flex-shrink: 0; }
+.mapillary-area-map { height: 300px; margin: 0 22px; border: 1px solid #d8e3dd; border-radius: 9px; overflow: hidden; }
+.mapillary-area-map .leaflet-container { height: 100%; width: 100%; }
+.mapillary-selection-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; padding: 18px 22px; color: var(--muted, #647780); font-size: 12px; }
+.mapillary-selection-summary strong { color: var(--accent-dark, #0d6553); margin-left: auto; }
+.mapillary-selection-summary button { min-height: 32px; padding: 6px 10px; font-size: 11px; }
+.mapillary-image-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 0 22px 20px; }
+.mapillary-image-card { min-width: 0; border: 1px solid #dce6df; border-radius: 10px; background: white; overflow: hidden; transition: border-color .15s, box-shadow .15s; }
+.mapillary-image-card.selected { border-color: var(--accent, #16806a); box-shadow: 0 0 0 1px var(--accent, #16806a); }
+.mapillary-image-select { position: relative; display: block; width: 100%; padding: 0; border: 0; background: white; color: var(--ink, #192f38); text-align: left; }
+.mapillary-image-select img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; background: #e8eeea; }
+.mapillary-image-select:hover:not(:disabled) { background: #f2f8f4; }
+.mapillary-image-select:focus-visible { outline-offset: -4px; }
+.mapillary-image-select:disabled { opacity: .65; }
+.mapillary-selection-check { position: absolute; right: 10px; top: 10px; display: grid; place-items: center; width: 23px; height: 23px; border: 1px solid white; border-radius: 6px; color: white; background: rgb(22 45 35 / 35%); }
+.selected .mapillary-selection-check { background: var(--accent, #16806a); border-color: var(--accent, #16806a); }
+.mapillary-image-details { display: grid; gap: 5px; padding: 13px 13px 10px; }
+.mapillary-image-details strong { font-size: 12px; }
+.mapillary-image-details > span { font-size: 11px; color: var(--muted, #647780); }
+.mapillary-attribution { display: flex; flex-wrap: wrap; gap: 5px 10px; color: var(--muted, #647780); font-size: 10px; line-height: 1.7; overflow-wrap: anywhere; }
+.mapillary-image-card > .mapillary-attribution { padding: 0 13px 14px; }
+.mapillary-attribution > span:first-child { flex-basis: 100%; }
+.mapillary-attribution a { display: inline-flex; gap: 3px; align-items: center; color: var(--accent-dark, #0d6553); text-decoration: underline; text-decoration-color: #c1d9cd; text-underline-offset: 2px; }
+.mapillary-attribution > span > a { display: inline; }
+.mapillary-capture-note { margin: 0; padding: 17px 22px; border-top: 1px solid var(--border, #dfe6e3); color: var(--muted, #647780); font-size: 11px; line-height: 1.8; }
+.mapillary-state { display: flex; align-items: flex-start; gap: 13px; padding: 28px 22px; color: var(--muted, #647780); font-size: 13px; line-height: 1.7; }
+.mapillary-state > svg { flex-shrink: 0; margin-top: 2px; color: #6e9482; }
+.mapillary-state strong { display: block; color: var(--ink, #192f38); font-size: 14px; }
+.mapillary-state p { margin: 8px 0 15px; font-size: 12px; max-width: 650px; }
+.mapillary-state p:last-child { margin-bottom: 0; }
+.mapillary-search-error { display: flex; align-items: flex-start; gap: 8px; margin: 16px 22px 0; padding: 12px; border: 1px solid #eddfb6; border-radius: 8px; background: #fff8e6; color: #8d681e; font-size: 12px; line-height: 1.7; }
+.mapillary-search-error svg { flex-shrink: 0; margin-top: 2px; }
+.bulk-row-name .mapillary-attribution { margin-top: 3px; font-size: 10px; }
+.bulk-row-name .mapillary-attribution span { font-size: inherit; color: inherit; }
+.bulk-row-name .mapillary-attribution a { font-size: inherit; }
+
+@media (max-width: 1100px) { .mapillary-image-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 650px) {
+  .mapillary-picker { margin: 0 20px 20px; }
+  .mapillary-picker-heading { padding: 18px 16px; flex-direction: column; gap: 9px; }
+  .mapillary-search-toolbar { padding: 16px; flex-direction: column; align-items: stretch; gap: 12px; }
+  .mapillary-area-map { margin: 0 16px; height: 270px; }
+  .mapillary-selection-summary { padding: 16px; gap: 9px; }
+  .mapillary-selection-summary > span { flex-basis: 100%; }
+  .mapillary-selection-summary strong { margin-left: 0; margin-right: auto; }
+  .mapillary-image-grid { padding: 0 16px 16px; gap: 11px; }
+  .mapillary-image-details { padding: 11px 10px 8px; }
+  .mapillary-image-card > .mapillary-attribution { padding: 0 10px 12px; font-size: 9px; }
+  .mapillary-image-details strong { font-size: 11px; }
+  .mapillary-image-details > span { font-size: 10px; }
+  .mapillary-capture-note { padding: 15px 16px; }
+  .mapillary-state { padding: 24px 16px; }
+  .mapillary-search-error { margin: 15px 16px 0; }
+}
+@media (max-width: 400px) { .mapillary-image-grid { grid-template-columns: 1fr; } }

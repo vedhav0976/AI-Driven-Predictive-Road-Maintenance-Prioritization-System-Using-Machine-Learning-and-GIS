@@ -18,16 +18,22 @@ from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.datastructures import Headers
 from PIL import Image
 from sqlalchemy import delete, func, select, true
+from sqlalchemy.exc import IntegrityError
 from ultralytics import YOLO
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
+load_dotenv(Path(__file__).resolve().parents[1] / ".env.local", override=False)
 
 from backend.assessment import road_geometry, score_detections, snap_to_road
 from backend.annotations import render_annotations, suppress_duplicate_boxes
 from backend.geotag import extract_image_location
 from backend.drive_import import DriveImportError, download_image, list_folder_images
+from backend import mapillary_client
 from backend.database import (
     DamageDetection, DetectionRecord, ImageAsset, Observation, RoadSegment, get_session,
     delete_analysis, initialize_database, persist_observation, refresh_road_segment, relocate_observation,
@@ -483,6 +489,14 @@ def saved_inferences() -> list[DetectionRecord]:
         )
 
 
+def record_source(record: DetectionRecord) -> dict[str, Any]:
+    return {
+        "source_type": record.source_type or "upload",
+        "source_image_id": record.source_image_id,
+        "source_metadata": record.source_metadata,
+    }
+
+
 def upload_observations(uploads: list[DetectionRecord]) -> list[dict[str, Any]]:
     return [
         {
@@ -499,7 +513,8 @@ def upload_observations(uploads: list[DetectionRecord]) -> list[dict[str, Any]]:
             "snapped_longitude": record.snapped_longitude,
             "location_status": record.location_status or "no_gps",
             "location_source": record.location_source,
-            "source": "uploaded_inference",
+            "source": "mapillary_inference" if record.source_type == "mapillary" else "uploaded_inference",
+            **record_source(record),
             "bbox": detection["bbox"],
             "pci_proxy": record.pci_proxy,
             "mpi_proxy": record.mpi_proxy,
@@ -547,7 +562,7 @@ def get_roads() -> dict[str, Any]:
         "records": upload_assessments + assessment_records(mapillary_observations()),
         "observations": observations,
         "road_segment_matches": len({record.road_id for record in uploads if record.road_id and record.detections}),
-        "note": "Uploaded images with EXIF GPS are matched to the nearest configured GeoJSON line within 30 m. The default file has local feature IDs; an imported OSMnx file can provide graph-edge IDs. Mapillary CSV observations remain unmatched.",
+        "note": "Saved analyses use image GPS or Mapillary API coordinates to match the nearest configured GeoJSON line within 30 m. The default file has local feature IDs; an imported OSMnx file can provide graph-edge IDs. Legacy Mapillary CSV observations remain unmatched.",
     }
 
 
@@ -587,6 +602,7 @@ def get_dashboard() -> dict[str, Any]:
                 "longitude": record.longitude,
                 "road_id": record.road_id,
                 "location_source": record.location_source,
+                **record_source(record),
                 "pci_proxy": record.pci_proxy,
                 "mpi_proxy": record.mpi_proxy,
                 "priority": record.priority,
@@ -600,7 +616,7 @@ def get_dashboard() -> dict[str, Any]:
                 "confidence": item["confidence"],
                 "location_status": item["location_status"],
                 "location_source": item["location_source"],
-                "source": "uploaded_inference",
+                "source": item["source"],
                 "road_id": item["road_id"],
                 "pci_proxy": item["pci_proxy"],
                 "mpi_proxy": item["mpi_proxy"],
@@ -620,7 +636,7 @@ def get_dashboard() -> dict[str, Any]:
         "limitations": [
             "GPS road snapping is approximate and not field-validated. The default road file has local feature IDs.",
             "Environmental vulnerability is not assessed.",
-            "PCI/MPI values are visual proxies, not ASTM PCI or a validated maintenance priority index. Images without EXIF or manually supplied coordinates remain unmatched.",
+            "PCI/MPI values are visual proxies, not ASTM PCI or a validated maintenance priority index. Images without readable image GPS or provider coordinates remain unlocated.",
         ],
     }
 
@@ -655,6 +671,9 @@ def get_observations(priority: str | None = None, limit: int = 50, offset: int =
         if priority:
             query = query.where(Observation.priority_tier == priority)
         observations = session.scalars(query.offset(offset).limit(limit)).all()
+        source_records = {record.id: record for record in session.scalars(
+            select(DetectionRecord).where(DetectionRecord.id.in_([item.legacy_record_id for item in observations]))
+        ).all()}
         records = []
         for item in observations:
             detections = session.scalars(
@@ -666,6 +685,7 @@ def get_observations(priority: str | None = None, limit: int = 50, offset: int =
                 "geolocated": item.geolocated, "processed": item.processed,
                 "location_status": item.location_status,
                 "location_source": item.location_source,
+                **(record_source(source_records[item.legacy_record_id]) if item.legacy_record_id in source_records else {}),
                 "road_id": item.segment_id,
                 "pci_score": item.pci_score, "mpi_score": item.mpi_score,
                 "priority": item.priority_tier,
@@ -691,8 +711,16 @@ def recheck_observation_location(observation_id: int) -> dict[str, Any]:
         if asset is None:
             raise HTTPException(status_code=404, detail="Original image is unavailable.")
         with Image.open(io.BytesIO(asset.original_bytes)) as source_image:
-            latitude, longitude, source = extract_image_location(source_image)
             width, height = source_image.size
+            if record.source_type == "mapillary" and record.source_image_id:
+                try:
+                    metadata = mapillary_client.get_image(record.source_image_id)
+                except mapillary_client.MapillaryError as exc:
+                    raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+                latitude, longitude, source = metadata["latitude"], metadata["longitude"], "mapillary"
+                record.source_metadata = metadata["source_metadata"]
+            else:
+                latitude, longitude, source = extract_image_location(source_image)
         if latitude is None or longitude is None or source is None:
             raise HTTPException(status_code=422, detail="No readable GPS metadata or coordinate stamp was found in this image.")
         road_match = snap_to_road(latitude, longitude)
@@ -806,6 +834,7 @@ def get_detections(limit: int = 50, offset: int = 0, query: str = "") -> dict[st
                     "road_id": item.road_id, "road_name": item.road_name,
                     "location_status": item.location_status or "no_gps",
                     "location_source": item.location_source,
+                    **record_source(item),
                     "pci_proxy": item.pci_proxy, "mpi_proxy": item.mpi_proxy,
                     "priority": item.priority,
                 }
@@ -834,6 +863,7 @@ def get_detection(record_id: int) -> dict[str, Any]:
             "snapped_longitude": record.snapped_longitude,
             "location_status": record.location_status or "no_gps",
             "location_source": record.location_source,
+            **record_source(record),
             "pci_proxy": record.pci_proxy, "mpi_proxy": record.mpi_proxy,
             "priority": record.priority, "scoring_basis": record.scoring_basis,
         }
@@ -889,9 +919,15 @@ def get_original_image(record_id: int) -> Response:
 async def analyze_damage(
     file: UploadFile = File(...), include_annotated_image: bool = True,
 ) -> dict[str, Any]:
-    if not file.content_type or not file.content_type.startswith("image/"):
+    return analyze_image_content(await file.read(), file.filename or "upload", file.content_type, include_annotated_image)
+
+
+def analyze_image_content(
+    content: bytes, filename: str, content_type: str | None, include_annotated_image: bool = True,
+    *, provider_location: tuple[float, float, str] | None = None, source_metadata: dict | None = None,
+) -> dict[str, Any]:
+    if not content_type or not content_type.startswith("image/"):
         raise HTTPException(status_code=415, detail="Upload a JPEG, PNG, or other image file.")
-    content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="The uploaded file is empty.")
     if len(content) > MAX_UPLOAD_BYTES:
@@ -899,7 +935,7 @@ async def analyze_damage(
     try:
         source_image = Image.open(io.BytesIO(content))
         source_format = source_image.format
-        latitude, longitude, location_source = extract_image_location(source_image)
+        latitude, longitude, location_source = provider_location or extract_image_location(source_image)
         image = source_image.convert("RGB")
     except Exception as exc:
         raise HTTPException(status_code=400, detail="The uploaded file is not a readable image.") from exc
@@ -959,13 +995,13 @@ async def analyze_damage(
     )
     unique_name = uuid4().hex
     original_extension = ".png" if source_format == "PNG" else ".jpg" if source_format == "JPEG" else ".img"
-    original_content_type = "image/png" if source_format == "PNG" else "image/jpeg" if source_format == "JPEG" else file.content_type
+    original_content_type = "image/png" if source_format == "PNG" else "image/jpeg" if source_format == "JPEG" else content_type
     original_path = UPLOAD_DIR / f"{unique_name}{original_extension}"
     annotated_path = ANNOTATED_DIR / f"{unique_name}_annotated.jpg"
     try:
         with get_session() as session:
             record = DetectionRecord(
-                original_filename=(file.filename or "upload")[:255],
+                original_filename=filename[:255],
                 image_path=str(original_path),
                 annotated_image_path=str(annotated_path),
                 detection_count=len(detections),
@@ -974,6 +1010,9 @@ async def analyze_damage(
                 latitude=latitude,
                 longitude=longitude,
                 location_source=location_source,
+                source_type=source_metadata["provider"] if source_metadata else "upload",
+                source_image_id=source_metadata["image_id"] if source_metadata else None,
+                source_metadata=source_metadata,
                 **road_match,
                 **assessment,
             )
@@ -988,12 +1027,20 @@ async def analyze_damage(
             persist_observation(session, record, json.dumps(geometry) if geometry else None)
             session.commit()
             record_id = record.id
+    except IntegrityError as exc:
+        if source_metadata and (saved := saved_mapillary_analysis(source_metadata["image_id"])):
+            return saved
+        logger.exception("Unable to save inference history")
+        raise HTTPException(status_code=500, detail="Inference succeeded but the result could not be saved.") from exc
     except Exception as exc:
         logger.exception("Unable to save inference history")
         raise HTTPException(status_code=500, detail="Inference succeeded but the result could not be saved.") from exc
     return {
         "id": record_id,
-        "filename": file.filename,
+        "filename": filename,
+        "source_type": source_metadata["provider"] if source_metadata else "upload",
+        "source_image_id": source_metadata["image_id"] if source_metadata else None,
+        "source_metadata": source_metadata,
         "model": model_info(),
         "image_width": image.width,
         "image_height": image.height,
@@ -1015,6 +1062,62 @@ async def analyze_damage(
 class DriveLinkRequest(BaseModel):
     link: str
     name: str | None = None
+
+
+class MapillaryImageRequest(BaseModel):
+    image_id: str = Field(pattern=r"^[0-9]{1,30}$")
+
+
+def saved_mapillary_analysis(image_id: str) -> dict[str, Any] | None:
+    with get_session() as session:
+        record = session.scalar(select(DetectionRecord).where(
+            DetectionRecord.source_type == "mapillary", DetectionRecord.source_image_id == image_id,
+        ))
+        if record is None:
+            return None
+        record_id = record.id
+        asset = session.get(ImageAsset, record_id)
+        width, height = (0, 0)
+        if asset:
+            with Image.open(io.BytesIO(asset.original_bytes)) as image:
+                width, height = image.size
+    return {
+        **get_detection(record_id), "model": model_info(), "image_width": width, "image_height": height,
+        "annotated_image": None, "reused": True, "message": "This Mapillary image was already analyzed. Its saved result is shown.",
+    }
+
+
+@app.get("/api/mapillary/status")
+def mapillary_status() -> dict[str, Any]:
+    return {"configured": mapillary_client.configured()}
+
+
+@app.get("/api/mapillary/search")
+def search_mapillary(bbox: str, limit: int = 24) -> dict[str, Any]:
+    try:
+        values = tuple(float(value) for value in bbox.split(","))
+        mapillary_client.validate_bbox(values)
+        limit = max(1, min(limit, 50))
+        return {"images": mapillary_client.search_images(values, limit), "limit": limit}
+    except mapillary_client.MapillaryError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Choose a valid map area.") from exc
+
+
+@app.post("/api/mapillary/analyze")
+def analyze_mapillary_image(request: MapillaryImageRequest) -> dict[str, Any]:
+    if saved := saved_mapillary_analysis(request.image_id):
+        return saved
+    try:
+        content, mime, metadata = mapillary_client.download_image(request.image_id)
+    except mapillary_client.MapillaryError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return analyze_image_content(
+        content, f"mapillary-{metadata['id']}.jpg", mime, False,
+        provider_location=(metadata["latitude"], metadata["longitude"], "mapillary"),
+        source_metadata=metadata["source_metadata"],
+    )
 
 
 @app.post("/api/drive/list")
