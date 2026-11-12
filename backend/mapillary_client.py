@@ -7,6 +7,7 @@ import logging
 import math
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote, urljoin, urlparse
 
 import requests
@@ -21,9 +22,10 @@ logger = logging.getLogger("road_resilience.mapillary")
 
 
 class MapillaryError(ValueError):
-    def __init__(self, message: str, status_code: int = 502):
+    def __init__(self, message: str, status_code: int = 502, retryable: bool = False):
         super().__init__(message)
         self.status_code = status_code
+        self.retryable = retryable
 
 
 def configured() -> bool:
@@ -46,17 +48,17 @@ def validate_bbox(bbox: tuple[float, float, float, float]) -> None:
         raise MapillaryError("Zoom in to search a smaller map area (up to 0.1 degrees per side).", 422)
 
 
-def _graph(path: str, params: dict | None = None) -> dict:
+def _graph(path: str, params: dict | None = None, *, read_timeout: int = 30) -> dict:
     token = os.getenv("MAPILLARY_ACCESS_TOKEN", "").strip()
     if not token:
         raise MapillaryError("Mapillary is not connected. Ask the administrator to configure its access token.", 503)
     try:
         response = requests.get(
             f"{GRAPH_URL}/{path}", params=params,
-            headers={"Authorization": f"OAuth {token}"}, timeout=(5, 30), allow_redirects=False,
+            headers={"Authorization": f"OAuth {token}"}, timeout=(5, read_timeout), allow_redirects=False,
         )
     except requests.RequestException as exc:
-        raise MapillaryError("Mapillary could not be reached. Please try again.") from exc
+        raise MapillaryError("Mapillary could not be reached. Please try again.", retryable=isinstance(exc, requests.Timeout)) from exc
     try:
         if response.status_code != 200:
             # Provider messages can contain request credentials; record only safe numeric diagnostics.
@@ -78,7 +80,7 @@ def _graph(path: str, params: dict | None = None) -> dict:
         if response.status_code == 429:
             raise MapillaryError("Mapillary's request limit was reached. Please wait and try again.", 429)
         if response.status_code != 200:
-            raise MapillaryError("Mapillary could not complete the request. Please try again.")
+            raise MapillaryError("Mapillary could not complete the request. Please try again.", retryable=response.status_code >= 500 or provider_code == 1)
         data = response.json()
         if not isinstance(data, dict) or "error" in data:
             raise MapillaryError("Mapillary returned an invalid response.")
@@ -151,10 +153,8 @@ def _normalize(item: dict) -> dict:
     }
 
 
-def search_images(bbox: tuple[float, float, float, float], limit: int = 24) -> list[dict]:
-    validate_bbox(bbox)
-    limit = max(1, min(limit, 50))
-    data = _graph("images", {"bbox": ",".join(str(value) for value in bbox), "fields": IMAGE_FIELDS, "limit": limit})
+def _search_box(bbox: tuple[float, float, float, float], limit: int) -> list[dict]:
+    data = _graph("images", {"bbox": ",".join(str(value) for value in bbox), "fields": IMAGE_FIELDS, "limit": limit}, read_timeout=15)
     if not isinstance(data.get("data"), list):
         raise MapillaryError("Mapillary returned an invalid image list.")
     images = []
@@ -173,6 +173,60 @@ def search_images(bbox: tuple[float, float, float, float], limit: int = 24) -> l
         normalized.pop("download_url")
         images.append(normalized)
     return images
+
+
+def _search_parts(bbox: tuple[float, float, float, float], limit: int) -> dict:
+    west, south, east, north = bbox
+    middle_x, middle_y = (west + east) / 2, (south + north) / 2
+    parts = [
+        (west, south, middle_x, middle_y), (middle_x, south, east, middle_y),
+        (west, middle_y, middle_x, north), (middle_x, middle_y, east, north),
+    ]
+    per_part = math.ceil(limit / len(parts))
+    images: list[dict] = []
+    failed = 0
+    seen: set[str] = set()
+    # Bounded parallel calls avoid making the user wait for four sequential provider requests.
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(_search_box, part, per_part) for part in parts]
+        for future in futures:
+            try:
+                result = future.result()
+            except MapillaryError as exc:
+                if not exc.retryable:
+                    raise
+                failed += 1
+                continue
+            for image in result:
+                if image["id"] in seen or not (west <= image["longitude"] <= east and south <= image["latitude"] <= north):
+                    continue
+                seen.add(image["id"])
+                images.append(image)
+    if failed == len(parts):
+        raise MapillaryError("Mapillary timed out while searching this area. Zoom in to a shorter road section and search again.", 503, retryable=True)
+    return {
+        "images": images[:limit], "partial": failed > 0,
+        "warning": "Some images could not be loaded from this area. Zoom in and search again to check the rest." if failed else None,
+    }
+
+
+def search_area(bbox: tuple[float, float, float, float], limit: int = 24) -> dict:
+    validate_bbox(bbox)
+    limit = max(1, min(limit, 50))
+    west, south, east, north = bbox
+    # Dense spatial queries can hit Mapillary's hard timeout even with a small result limit.
+    if east - west > 0.025000001 or north - south > 0.025000001:
+        return _search_parts(bbox, limit)
+    try:
+        return {"images": _search_box(bbox, limit), "partial": False, "warning": None}
+    except MapillaryError as exc:
+        if not exc.retryable:
+            raise
+        return _search_parts(bbox, limit)
+
+
+def search_images(bbox: tuple[float, float, float, float], limit: int = 24) -> list[dict]:
+    return search_area(bbox, limit)["images"]
 
 
 def get_image(image_id: str) -> dict:

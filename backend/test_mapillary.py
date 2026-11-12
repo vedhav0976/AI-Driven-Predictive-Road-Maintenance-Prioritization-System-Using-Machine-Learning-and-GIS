@@ -169,6 +169,90 @@ class MapillaryClientTests(unittest.TestCase):
             with self.assertRaisesRegex(mapillary.MapillaryError, "unreadable image"):
                 mapillary.download_image("123456789")
 
+    def test_area_search_subdivides_and_merges_without_duplicates_or_outside_points(self):
+        bbox = (77.56, 12.96, 77.60, 13.00)
+
+        def search_box(box, limit):
+            west, south, east, north = box
+            image_id = f"{west:.3f}:{south:.3f}"
+            return [
+                {"id": image_id, "longitude": (west + east) / 2, "latitude": (south + north) / 2},
+                {"id": "same-image", "longitude": 77.58, "latitude": 12.98},
+                {"id": "outside", "longitude": 78.0, "latitude": 14.0},
+            ]
+
+        with patch.object(mapillary, "_search_box", side_effect=search_box) as search:
+            result = mapillary.search_area(bbox, limit=7)
+        self.assertEqual(search.call_count, 4)
+        self.assertEqual(len({call.args[0] for call in search.call_args_list}), 4)
+        self.assertTrue(all(call.args[1] == 2 for call in search.call_args_list))
+        self.assertLessEqual(len(result["images"]), 7)
+        ids = [image["id"] for image in result["images"]]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertIn("same-image", ids)
+        self.assertNotIn("outside", ids)
+        self.assertFalse(result["partial"])
+        self.assertIsNone(result["warning"])
+
+    def test_small_area_transient_failure_gets_one_bounded_subdivision(self):
+        bbox = (77.60, 12.96, 77.62, 12.98)
+
+        def search_box(box, limit):
+            if box == bbox:
+                raise mapillary.MapillaryError("Provider timed out", retryable=True)
+            west, south, east, north = box
+            return [{"id": f"{west:.3f}:{south:.3f}", "longitude": (west + east) / 2, "latitude": (south + north) / 2}]
+
+        with patch.object(mapillary, "_search_box", side_effect=search_box) as search:
+            result = mapillary.search_area(bbox, limit=4)
+        self.assertEqual(search.call_count, 5)
+        self.assertEqual(len(result["images"]), 4)
+        self.assertFalse(result["partial"])
+
+    def test_area_search_marks_partially_unavailable_subareas(self):
+        bbox = (77.56, 12.96, 77.60, 13.00)
+
+        def search_box(box, limit):
+            west, south, east, north = box
+            if west == bbox[0] and south == bbox[1]:
+                raise mapillary.MapillaryError("Provider timed out", retryable=True)
+            return [{"id": f"{west:.3f}:{south:.3f}", "longitude": (west + east) / 2, "latitude": (south + north) / 2}]
+
+        with patch.object(mapillary, "_search_box", side_effect=search_box) as search:
+            result = mapillary.search_area(bbox, limit=12)
+        self.assertEqual(search.call_count, 4)
+        self.assertEqual(len(result["images"]), 3)
+        self.assertTrue(result["partial"])
+        self.assertTrue(result["warning"])
+
+    def test_all_failed_subareas_return_useful_error_instead_of_empty_success(self):
+        with patch.object(mapillary, "_search_box", side_effect=mapillary.MapillaryError("Provider timed out", retryable=True)) as search:
+            with self.assertRaises(mapillary.MapillaryError) as caught:
+                mapillary.search_area((77.56, 12.96, 77.60, 13.00))
+        self.assertEqual(search.call_count, 4)
+        self.assertEqual(caught.exception.status_code, 503)
+
+    def test_auth_and_rate_errors_are_not_retried_by_subdivision(self):
+        for status in (503, 429):
+            with self.subTest(status=status), patch.object(mapillary, "_search_box", side_effect=mapillary.MapillaryError("Connection rejected", status_code=status)) as search:
+                with self.assertRaises(mapillary.MapillaryError) as caught:
+                    mapillary.search_area((77.60, 12.96, 77.62, 12.98))
+                self.assertEqual(search.call_count, 1)
+                self.assertEqual(caught.exception.status_code, status)
+
+    def test_provider_timeout_codes_are_retryable_but_bad_tokens_are_not(self):
+        for status, code, expected in ((400, 1, True), (400, 100, False), (500, 1, True), (500, 190, False), (400, 102, False), (429, 4, False)):
+            response = self.response({"error": {"code": code, "message": "private-test-token"}}, status=status)
+            with self.subTest(status=status, code=code), patch.object(mapillary.requests, "get", return_value=response):
+                with self.assertRaises(mapillary.MapillaryError) as caught:
+                    mapillary.get_image("123456789")
+                self.assertEqual(caught.exception.retryable, expected)
+                self.assertNotIn("private-test-token", str(caught.exception))
+        with patch.object(mapillary.requests, "get", side_effect=requests.ReadTimeout("private-test-token")):
+            with self.assertRaises(mapillary.MapillaryError) as caught:
+                mapillary.get_image("123456789")
+            self.assertTrue(caught.exception.retryable)
+
 
 if __name__ == "__main__":
     unittest.main()

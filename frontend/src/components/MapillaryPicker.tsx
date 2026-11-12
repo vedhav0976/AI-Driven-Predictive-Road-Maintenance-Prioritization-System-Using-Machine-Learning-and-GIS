@@ -40,6 +40,8 @@ export default function MapillaryPicker({ selected, onSelectionChange, queuedIds
   const [searching, setSearching] = useState(false);
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchWarning, setSearchWarning] = useState<string | null>(null);
+  const [partialResults, setPartialResults] = useState(false);
   const mapRef = useRef<LeafletMap | null>(null);
   const searchAbort = useRef<AbortController | null>(null);
   const selectedIds = useMemo(() => new Set(selected.map((image) => image.id)), [selected]);
@@ -62,6 +64,8 @@ export default function MapillaryPicker({ selected, onSelectionChange, queuedIds
 
   const searchArea = async () => {
     if (!mapRef.current || searching || disabled || !configured) return;
+    setSearchWarning(null);
+    setPartialResults(false);
     const bounds = mapRef.current.getBounds();
     const west = Math.max(-180, bounds.getWest());
     const east = Math.min(180, bounds.getEast());
@@ -77,8 +81,10 @@ export default function MapillaryPicker({ selected, onSelectionChange, queuedIds
     searchAbort.current = controller;
     try {
       const params = new URLSearchParams({ bbox: [west, south, east, north].map((value) => value.toFixed(7)).join(","), limit: "24" });
-      const result = await apiFetch<{ images: MapillaryImage[]; limit: number }>(`/api/mapillary/search?${params}`, { signal: controller.signal });
+      const result = await apiFetch<{ images: MapillaryImage[]; limit: number; partial: boolean; warning: string | null }>(`/api/mapillary/search?${params}`, { signal: controller.signal });
       setImages(result.images);
+      setSearchWarning(result.warning);
+      setPartialResults(Boolean(result.partial));
       setSearched(true);
     } catch (reason) {
       if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Mapillary imagery could not be loaded. Please try again.");
@@ -99,8 +105,9 @@ export default function MapillaryPicker({ selected, onSelectionChange, queuedIds
               {images.map((image) => <CircleMarker key={image.id} center={[image.latitude, image.longitude]} radius={selectedIds.has(image.id) ? 7 : 5} pathOptions={{ color: selectedIds.has(image.id) ? "#0b6652" : "#276b80", fillColor: selectedIds.has(image.id) ? "#16806a" : "#4b99b0", fillOpacity: 0.85, weight: 2 }} eventHandlers={{ click: () => toggleImage(image) }} />)}
             </MapContainer></div>
             {error && <p className="mapillary-search-error" role="alert"><AlertTriangle size={16} />{error}</p>}
+            {searchWarning && <p className="mapillary-search-error" role="status"><AlertTriangle size={16} />{searchWarning}</p>}
             <div className="mapillary-selection-summary"><span>{searched ? `${images.length} image${images.length === 1 ? "" : "s"} in this search` : "Search the map to find available imagery"}</span><strong>{selected.length} selected</strong>{selected.length > 0 && <button className="panel-action" type="button" disabled={disabled} onClick={() => onSelectionChange([])}>Clear selection</button>}</div>
-            {searched && images.length === 0 && !searching && <div className="mapillary-state"><Image size={26} /><div><strong>No images found in this area</strong><p>Try another road or move the map to a nearby area, then search again.</p></div></div>}
+            {searched && images.length === 0 && !searching && !error && <div className="mapillary-state"><Image size={26} /><div><strong>{partialResults ? "Some road areas could not be searched" : "No images found in this area"}</strong><p>{partialResults ? "Zoom in to a smaller road area and search again to check for more imagery." : "Try another road or move the map to a nearby area, then search again."}</p></div></div>}
             {images.length > 0 && <div className="mapillary-image-grid" aria-label="Mapillary search results">{images.map((image) => <article className={`mapillary-image-card ${selectedIds.has(image.id) ? "selected" : ""}`} key={image.id}>
               <button className="mapillary-image-select" type="button" aria-pressed={selectedIds.has(image.id)} aria-label={`${queued.has(image.id) ? "Already queued" : selectedIds.has(image.id) ? "Deselect" : "Select"} Mapillary image ${image.id}, ${captureDate(image.captured_at)}`} disabled={disabled || queued.has(image.id)} onClick={() => toggleImage(image)}>
                 <img src={image.thumbnail_url} alt={`Road scene from Mapillary, ${captureDate(image.captured_at)}`} loading="lazy" referrerPolicy="no-referrer" />

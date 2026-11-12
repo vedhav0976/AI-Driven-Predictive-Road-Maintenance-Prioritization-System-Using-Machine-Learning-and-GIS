@@ -1098,7 +1098,7 @@ def search_mapillary(bbox: str, limit: int = 24) -> dict[str, Any]:
         values = tuple(float(value) for value in bbox.split(","))
         mapillary_client.validate_bbox(values)
         limit = max(1, min(limit, 50))
-        return {"images": mapillary_client.search_images(values, limit), "limit": limit}
+        return {**mapillary_client.search_area(values, limit), "limit": limit}
     except mapillary_client.MapillaryError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except ValueError as exc:

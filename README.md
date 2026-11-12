@@ -178,6 +178,8 @@ Mapillary imagery is licensed under [CC BY-SA 4.0](https://help.mapillary.com/hc
 
 Run `python -m backend.check_mapillary --download` to verify token access, Bengaluru search, and an in-memory image download without creating a database record. API credentials travel only to the Mapillary Graph host; image downloads accept trusted Mapillary/Meta CDN URLs returned by the provider, have timeouts and a 15 MB cap, and do not forward the API token to the CDN.
 
+Dense Mapillary searches can time out at the provider. The backend searches larger map areas as four smaller requests in parallel, with a bounded fallback for smaller areas that time out. It merges and deduplicates the results; if only part of the area loads, the picker keeps those images selectable and shows a partial-search notice. Zoom in to a shorter road section to retry areas that remain unavailable. Authentication and rate-limit errors are reported directly.
+
 PyTorch, Ultralytics, OpenCV, OCR, and the checkpoint make the backend a large Python function. A deployed build and public API health check passed; a live image inference request has not yet been tested. Vercel Functions limit request bodies to 4.5 MB, so larger image uploads need a direct-to-storage flow or another backend host. The local SQLite file and uploaded images are ignored by Git. Public image endpoints and upload APIs have no authentication, so restrict access before using sensitive imagery.
 
 ### Alternative: Vercel frontend + Render backend
