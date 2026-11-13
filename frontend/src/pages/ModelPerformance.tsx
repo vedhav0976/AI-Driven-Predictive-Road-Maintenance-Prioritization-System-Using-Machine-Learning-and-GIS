@@ -17,6 +17,9 @@ function ModelPerformance() {
 
   const metrics = data?.metrics;
   const dataset = data?.model.dataset;
+  const checkpointClasses = Object.values(data?.model.class_names ?? {})
+    .map((name) => name.replace(/^D\d+_/, "").replaceAll("_", " "))
+    .join(", ") || "Unavailable";
   const percent = (value?: number | null) => value == null ? data || error ? "Unavailable" : "—" : `${(value * 100).toFixed(1)}%`;
   const localCount = (value?: number) => value ? value.toLocaleString() : "Not available locally";
 
@@ -40,6 +43,7 @@ function ModelPerformance() {
         <Config label="Evidence source" value={metrics?.reported ? "Training console results" : metrics?.source ?? "Unavailable"} />
         <Config label="Validation images" value={metrics?.validation_images?.toLocaleString() ?? localCount(dataset?.val)} />
         <Config label="Damage instances" value={metrics?.instances?.toLocaleString() ?? "Unavailable"} />
+        <Config label="Checkpoint classes" value={checkpointClasses} />
         <Config label="Completed epochs" value={metrics?.epochs?.toString() ?? "Not supplied"} />
         <Config label="Reported inference time" value={metrics?.speed_ms ? `${metrics.speed_ms.inference} ms / image` : "Unavailable"} />
       </div></div>

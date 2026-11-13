@@ -55,9 +55,9 @@ MODEL_CANDIDATES = (
         "model": PROJECT_ROOT / "models" / "best.pt",
         "metrics": PROJECT_ROOT / "models" / "results.csv",
         "config": PROJECT_ROOT / "models" / "args.yaml",
-        "run": "models",
-        "name": "Supplied road-damage YOLO checkpoint",
-        "dataset_name": "RDD2022",
+        "run": "road_damage/yolov8s_v2_reg",
+        "name": "YOLOv8s road-damage checkpoint (D20 and D40)",
+        "dataset_name": "Road-Damage-Detection-1 (from training config)",
         "dataset_root": PROJECT_ROOT / "data" / "RDD2022_INDIA",
     },
     {
