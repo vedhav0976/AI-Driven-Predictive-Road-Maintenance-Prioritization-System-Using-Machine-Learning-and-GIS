@@ -5,6 +5,7 @@ import { AlertTriangle, ArrowRight, BrainCircuit, CheckCircle2, ImagePlus, Image
 import { API_BASE, apiFetch, sampleUrl } from "../api";
 import type { Detection, MapillaryImage, ModelInfo, SourceMetadata } from "../api";
 import MapillaryPicker, { MapillaryImageAttribution } from "../components/MapillaryPicker";
+import { appendGps, prepareImageForUpload } from "../utils/prepareUpload";
 import "./AnalysisWorkspace.css";
 
 type AnalysisResult = {
@@ -28,7 +29,8 @@ type AnalysisResult = {
   mpi_proxy: number | null;
   priority: string | null;
   scoring_basis: string;
-  annotated_image: string;
+  annotated_image: string | null;
+  annotated_image_url: string;
   message: string;
 };
 
@@ -152,8 +154,10 @@ function AIDamageAnalysis() {
     setError(null);
     try {
       const form = new FormData();
-      form.append("file", selectedFile);
-      setResult(await apiFetch<AnalysisResult>("/api/damage/analyze", { method: "POST", body: form }));
+      const prepared = await prepareImageForUpload(selectedFile);
+      form.append("file", prepared.file);
+      appendGps(form, prepared.gps);
+      setResult(await apiFetch<AnalysisResult>("/api/damage/analyze?include_annotated_image=false", { method: "POST", body: form }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Inference failed.");
     } finally {
@@ -275,7 +279,9 @@ function AIDamageAnalysis() {
             });
           } else {
             const form = new FormData();
-            form.append("file", item.file!);
+            const prepared = await prepareImageForUpload(item.file!);
+            form.append("file", prepared.file);
+            appendGps(form, prepared.gps);
             result = await apiFetch<BulkAnalysisResult>("/api/upload?include_annotated_image=false", { method: "POST", body: form });
           }
           setBulkQueue((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: "complete", result } : entry));
@@ -406,7 +412,7 @@ function AIDamageAnalysis() {
             ) : error ? (
               <div className="analysis-output-error"><AlertTriangle size={18} /><span>{error}</span></div>
             ) : result ? (
-              <img src={result.annotated_image} alt="Annotated model output" style={{ width: "100%", borderRadius: 12 }} />
+              <img src={result.annotated_image ?? `${API_BASE}${result.annotated_image_url}`} alt="Annotated model output" style={{ width: "100%", borderRadius: 12 }} />
             ) : (
               <div className="analysis-output-empty"><p>Select an image, then choose <strong>Run AI Analysis</strong> to generate the annotated output.</p></div>
             )}

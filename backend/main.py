@@ -14,7 +14,7 @@ from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -918,13 +918,23 @@ def get_original_image(record_id: int) -> Response:
 @app.post("/api/damage/analyze")
 async def analyze_damage(
     file: UploadFile = File(...), include_annotated_image: bool = True,
+    exif_latitude: float | None = Form(None), exif_longitude: float | None = Form(None),
 ) -> dict[str, Any]:
-    return analyze_image_content(await file.read(), file.filename or "upload", file.content_type, include_annotated_image)
+    client_exif_location = None
+    if exif_latitude is not None and exif_longitude is not None:
+        if not (-90 <= exif_latitude <= 90 and -180 <= exif_longitude <= 180) or (exif_latitude == 0 and exif_longitude == 0):
+            raise HTTPException(status_code=422, detail="The image GPS metadata is invalid.")
+        client_exif_location = (exif_latitude, exif_longitude, "exif")
+    return analyze_image_content(
+        await file.read(), file.filename or "upload", file.content_type, include_annotated_image,
+        client_exif_location=client_exif_location,
+    )
 
 
 def analyze_image_content(
     content: bytes, filename: str, content_type: str | None, include_annotated_image: bool = True,
-    *, provider_location: tuple[float, float, str] | None = None, source_metadata: dict | None = None,
+    *, provider_location: tuple[float, float, str] | None = None,
+    client_exif_location: tuple[float, float, str] | None = None, source_metadata: dict | None = None,
 ) -> dict[str, Any]:
     if not content_type or not content_type.startswith("image/"):
         raise HTTPException(status_code=415, detail="Upload a JPEG, PNG, or other image file.")
@@ -935,7 +945,10 @@ def analyze_image_content(
     try:
         source_image = Image.open(io.BytesIO(content))
         source_format = source_image.format
-        latitude, longitude, location_source = provider_location or extract_image_location(source_image)
+        image_location = extract_image_location(source_image)
+        latitude, longitude, location_source = provider_location or (
+            image_location if image_location[0] is not None else client_exif_location or image_location
+        )
         image = source_image.convert("RGB")
     except Exception as exc:
         raise HTTPException(status_code=400, detail="The uploaded file is not a readable image.") from exc
