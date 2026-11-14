@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import json
+import math
 from datetime import datetime
 from pathlib import Path
 
@@ -83,6 +85,10 @@ class RoadSegment(Base):
     mpi_score: Mapped[float | None] = mapped_column(Float)
     priority_tier: Mapped[str | None] = mapped_column(String(10))
     geometry_geojson: Mapped[str] = mapped_column(Text, nullable=False)
+    near_critical_facility: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
+    critical_facility_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    projected_pci_60d: Mapped[float | None] = mapped_column(Float, nullable=True)
+    days_to_critical: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class Observation(Base):
@@ -160,6 +166,12 @@ def initialize_database() -> None:
                 connection.execute(text(f"ALTER TABLE detection_records ADD COLUMN{exists_guard} {name} {column_type}"))
         if "location_source" not in observation_existing:
             connection.execute(text(f"ALTER TABLE observations ADD COLUMN{exists_guard} location_source VARCHAR(40)"))
+        road_existing = {column["name"] for column in inspect(connection).get_columns("road_segments")}
+        road_columns = {"near_critical_facility": "BOOLEAN", "critical_facility_name": "VARCHAR(255)",
+                        "projected_pci_60d": "FLOAT", "days_to_critical": "INTEGER"}
+        for name, column_type in road_columns.items():
+            if name not in road_existing:
+                connection.execute(text(f"ALTER TABLE road_segments ADD COLUMN{exists_guard} {name} {column_type}"))
         connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_detection_source_image ON detection_records (source_type, source_image_id)"))
 
 
@@ -190,15 +202,46 @@ def refresh_road_segment(session: Session, segment_id: str | None) -> None:
     if not observations:
         session.delete(segment)
         return
-    detections = session.scalars(
-        select(DamageDetection).join(Observation).where(Observation.segment_id == segment_id)
-    ).all()
-    score = score_detections(
-        [{"class_name": item.class_name} for item in detections], 1, 1, segment.road_type,
-    )
-    segment.pci_score = score["pci_proxy"]
-    segment.mpi_score = score["mpi_proxy"]
-    segment.priority_tier = score["priority"]
+    penalties = {"D00": 8.0, "D10": 8.0, "D20": 15.0, "D40": 20.0}
+    by_observation: dict[int, float] = {}
+    for observation_id in observations:
+        detections = session.scalars(select(DamageDetection).where(DamageDetection.observation_id == observation_id)).all()
+        values = [penalty for detection in detections for code, penalty in penalties.items() if code in detection.class_name.upper()]
+        if values: by_observation[observation_id] = sum(values)
+    if not by_observation: return
+    avg_penalty = sum(by_observation.values()) / len(by_observation)
+    pci = round(max(0.0, 100.0 - avg_penalty), 1)
+    exposure = {"trunk": 1.5, "primary": 1.5, "secondary": 1.3, "tertiary": 1.2}.get(segment.road_type, 1.0)
+    if segment.near_critical_facility is None:
+        try:
+            geometry = json.loads(segment.geometry_geojson)
+            coords = geometry.get("coordinates", [])
+            if geometry.get("type") == "MultiLineString": coords = coords[0] if coords else []
+            if coords:
+                point = coords[len(coords) // 2]
+                from backend.overpass_client import check_nearby_critical_facility
+                segment.near_critical_facility, segment.critical_facility_name = check_nearby_critical_facility(float(point[1]), float(point[0]), 300)
+        except Exception:
+            segment.near_critical_facility = False
+    essential = 1.2 if segment.near_critical_facility else 1.0
+    mpi = round(min(100.0, avg_penalty * exposure * essential), 2)
+    segment.pci_score = pci
+    segment.mpi_score = mpi
+    segment.priority_tier = "High" if mpi >= 50 else "Medium" if mpi >= 25 else "Low"
+    decay = 0.12 * exposure * 1.2
+    segment.projected_pci_60d = round(max(0.0, pci - decay * 60), 1)
+    segment.days_to_critical = max(0, math.ceil((pci - 50) / decay)) if decay and pci > 50 else 0
+    for observation_id, penalty in by_observation.items():
+        observation = session.get(Observation, observation_id)
+        if observation is None: continue
+        item_pci = round(max(0.0, 100.0 - penalty), 1)
+        item_mpi = round(min(100.0, penalty * exposure * essential), 2)
+        item_priority = "High" if item_mpi >= 50 else "Medium" if item_mpi >= 25 else "Low"
+        observation.pci_score, observation.mpi_score, observation.priority_tier = item_pci, item_mpi, item_priority
+        if observation.legacy_record_id:
+            record = session.get(DetectionRecord, observation.legacy_record_id)
+            if record is not None:
+                record.pci_proxy, record.mpi_proxy, record.priority = item_pci, item_mpi, item_priority
 
 
 def delete_analysis(session: Session, record_id: int) -> str | None:

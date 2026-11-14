@@ -192,6 +192,10 @@ export type InspectionObservation = {
   road_id: string | null;
   pci_score: number | null;
   mpi_score: number | null;
+  near_critical_facility?: boolean | null;
+  critical_facility_name?: string | null;
+  projected_pci_60d?: number | null;
+  days_to_critical?: number | null;
   priority: "High" | "Medium" | "Low" | null;
   detection_count: number;
   damage_types: string[];
@@ -210,8 +214,12 @@ export type PriorityMap = {
       road_name: string | null;
       road_type: string | null;
       criticality_factor: number;
+      near_critical_facility?: boolean | null;
+      critical_facility_name?: string | null;
       pci_score: number | null;
       mpi_score: number | null;
+      projected_pci_60d?: number | null;
+      days_to_critical?: number | null;
       priority: "High" | "Medium" | "Low" | null;
       color: string;
     };

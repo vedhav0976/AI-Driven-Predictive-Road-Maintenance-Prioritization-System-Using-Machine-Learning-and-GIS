@@ -90,7 +90,9 @@ def road_geometry(road_id: str) -> dict[str, Any] | None:
 def criticality_factor(road_type: str | None) -> float:
     if road_type in {"motorway", "trunk", "primary", "primary_link", "trunk_link"}:
         return 1.5
-    if road_type in {"secondary", "secondary_link", "tertiary", "tertiary_link"}:
+    if road_type in {"secondary", "secondary_link"}:
+        return 1.3
+    if road_type in {"tertiary", "tertiary_link"}:
         return 1.2
     return 1.0
 
@@ -161,7 +163,39 @@ def snap_to_road(latitude: float | None, longitude: float | None) -> dict[str, A
             distance = math.hypot((longitude - snapped_lon) * x_scale, (latitude - snapped_lat) * y_scale)
             if nearest is None or distance < nearest[0]:
                 nearest = distance, road_id, road_name, road_type, snapped_lat, snapped_lon
+    # Reuse already persisted Overpass ways before making another public query.
     if nearest is None or nearest[0] > MAX_SNAP_METERS:
+        try:
+            from backend.database import RoadSegment, get_session
+            with get_session() as session:
+                cached = session.query(RoadSegment).filter(RoadSegment.segment_id.like("osm-way-%")).all()
+                for segment in cached:
+                    geo = json.loads(segment.geometry_geojson)
+                    coords = geo.get("coordinates", [])
+                    if geo.get("type") == "MultiLineString": coords = [p for line in coords for p in line]
+                    for a, b in zip(coords, coords[1:]):
+                        x1, y1 = float(a[0]), float(a[1]); x2, y2 = float(b[0]), float(b[1])
+                        dx, dy = (x2-x1)*x_scale, (y2-y1)*y_scale
+                        den = dx*dx + dy*dy
+                        t = 0 if den == 0 else max(0.0, min(1.0, (((longitude-x1)*x_scale*dx)+((latitude-y1)*y_scale*dy))/den))
+                        slon, slat = x1+(x2-x1)*t, y1+(y2-y1)*t
+                        distance = math.hypot((longitude-slon)*x_scale, (latitude-slat)*y_scale)
+                        if nearest is None or distance < nearest[0]:
+                            nearest = distance, segment.segment_id, segment.road_name, segment.road_type, slat, slon
+        except Exception:
+            pass
+    if nearest is None or nearest[0] > MAX_SNAP_METERS:
+        try:
+            from backend.overpass_client import fetch_nearest_osm_road
+            osm = fetch_nearest_osm_road(latitude, longitude, int(MAX_SNAP_METERS))
+        except Exception:
+            osm = None
+        if osm:
+            return {"road_id": osm["osm_way_id"], "road_name": osm["road_name"],
+                    "road_type": osm["road_type"], "criticality_factor": criticality_factor(osm["road_type"]),
+                    "snap_distance_m": round(osm["distance_m"], 1),
+                    "snapped_latitude": osm["snapped_latitude"], "snapped_longitude": osm["snapped_longitude"],
+                    "location_status": "road_snapped", "road_geometry": osm["geometry"]}
         return {"road_id": None, "road_name": None, "road_type": None,
                 "criticality_factor": 1.0,
                 "snap_distance_m": round(nearest[0], 1) if nearest else None,

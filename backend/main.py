@@ -497,6 +497,17 @@ def record_source(record: DetectionRecord) -> dict[str, Any]:
     }
 
 
+def matched_road_geometry(road_id: str | None) -> dict[str, Any] | None:
+    if not road_id:
+        return None
+    geometry = road_geometry(road_id)
+    if geometry is not None:
+        return geometry
+    with get_session() as session:
+        segment = session.get(RoadSegment, road_id)
+        return json.loads(segment.geometry_geojson) if segment else None
+
+
 def upload_observations(uploads: list[DetectionRecord]) -> list[dict[str, Any]]:
     return [
         {
@@ -688,6 +699,9 @@ def get_observations(priority: str | None = None, limit: int = 50, offset: int =
                 **(record_source(source_records[item.legacy_record_id]) if item.legacy_record_id in source_records else {}),
                 "road_id": item.segment_id,
                 "pci_score": item.pci_score, "mpi_score": item.mpi_score,
+                **({"near_critical_facility": (segment := session.get(RoadSegment, item.segment_id)).near_critical_facility,
+                   "critical_facility_name": segment.critical_facility_name, "projected_pci_60d": segment.projected_pci_60d,
+                   "days_to_critical": segment.days_to_critical} if item.segment_id and session.get(RoadSegment, item.segment_id) else {}),
                 "priority": item.priority_tier,
                 "detection_count": len(detections),
                 "damage_types": sorted({detection.class_name for detection in detections}),
@@ -724,8 +738,9 @@ def recheck_observation_location(observation_id: int) -> dict[str, Any]:
         if latitude is None or longitude is None or source is None:
             raise HTTPException(status_code=422, detail="No readable GPS metadata or coordinate stamp was found in this image.")
         road_match = snap_to_road(latitude, longitude)
+        match_geometry = road_match.pop("road_geometry", None)
         assessment = score_detections(record.detections, width, height, road_match["road_type"])
-        geometry = road_geometry(road_match["road_id"]) if road_match["road_id"] else None
+        geometry = match_geometry or matched_road_geometry(road_match["road_id"])
         relocate_observation(
             session, observation, record, latitude, longitude,
             road_match, assessment, json.dumps(geometry) if geometry else None, source,
@@ -737,6 +752,10 @@ def recheck_observation_location(observation_id: int) -> dict[str, Any]:
             "location_status": observation.location_status, "road_id": observation.segment_id,
             "pci_score": observation.pci_score, "mpi_score": observation.mpi_score,
             "priority": observation.priority_tier,
+            "near_critical_facility": session.get(RoadSegment, observation.segment_id).near_critical_facility if observation.segment_id and session.get(RoadSegment, observation.segment_id) else None,
+            "critical_facility_name": session.get(RoadSegment, observation.segment_id).critical_facility_name if observation.segment_id and session.get(RoadSegment, observation.segment_id) else None,
+            "projected_pci_60d": session.get(RoadSegment, observation.segment_id).projected_pci_60d if observation.segment_id and session.get(RoadSegment, observation.segment_id) else None,
+            "days_to_critical": session.get(RoadSegment, observation.segment_id).days_to_critical if observation.segment_id and session.get(RoadSegment, observation.segment_id) else None,
         }
 
 
@@ -756,6 +775,10 @@ def get_priority_map() -> dict[str, Any]:
                         "criticality_factor": segment.criticality_factor,
                         "pci_score": segment.pci_score, "mpi_score": segment.mpi_score,
                         "priority": segment.priority_tier,
+                        "near_critical_facility": segment.near_critical_facility,
+                        "critical_facility_name": segment.critical_facility_name,
+                        "projected_pci_60d": segment.projected_pci_60d,
+                        "days_to_critical": segment.days_to_critical,
                         "color": {"High": "#EF4444", "Medium": "#F59E0B", "Low": "#10B981"}.get(segment.priority_tier, "#94a3b8"),
                     },
                 }
@@ -998,6 +1021,7 @@ def analyze_image_content(
         ],
     )
     road_match = snap_to_road(latitude, longitude)
+    match_geometry = road_match.pop("road_geometry", None)
     assessment = score_detections(detections, image.width, image.height, road_match["road_type"])
     image_buffer = io.BytesIO()
     render_annotations(image, detections).save(image_buffer, format="JPEG", quality=90)
@@ -1036,7 +1060,7 @@ def analyze_image_content(
                 original_content_type=original_content_type,
                 annotated_bytes=annotated_bytes,
             ))
-            geometry = road_geometry(record.road_id) if record.road_id else None
+            geometry = match_geometry or matched_road_geometry(record.road_id)
             persist_observation(session, record, json.dumps(geometry) if geometry else None)
             session.commit()
             record_id = record.id
