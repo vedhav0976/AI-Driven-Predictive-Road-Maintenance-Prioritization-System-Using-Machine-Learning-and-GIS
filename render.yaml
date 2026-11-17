@@ -3,15 +3,24 @@ services:
     name: road-resilience
     runtime: docker
     region: singapore
+    # Keep the existing 1 CPU / 2 GB plan for PyTorch inference.
+    # This is a paid Render plan; review pricing before creating the service.
     plan: 1c-2g
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     healthCheckPath: /health
     envVars:
+      # Use the existing Supabase PostgreSQL database so current analyses stay
+      # in the same database. Paste the Supabase session-pooler URL in Render.
       - key: DATABASE_URL
-        fromDatabase:
-          name: road-resilience-db
-          property: connectionString
-databases:
-  - name: road-resilience-db
-    region: singapore
-    plan: 0.1c-256mb
-    databaseName: road_resilience
+        sync: false
+      - key: ROAD_RESILIENCE_CORS
+        value: https://road-maintenance-ai.vercel.app
+      - key: ROAD_RESILIENCE_DELETE_KEY
+        sync: false
+      - key: MAPILLARY_ACCESS_TOKEN
+        sync: false
+      - key: ROAD_RESILIENCE_CONFIDENCE
+        value: "0.25"
+      - key: ROAD_RESILIENCE_IMAGE_SIZE
+        value: "960"

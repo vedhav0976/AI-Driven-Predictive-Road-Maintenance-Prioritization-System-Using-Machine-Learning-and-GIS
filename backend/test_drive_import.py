@@ -43,6 +43,13 @@ class DriveImportTests(unittest.TestCase):
             with self.assertRaisesRegex(DriveImportError, "15 MB"):
                 download_image("https://drive.google.com/file/d/abcdefghij123/view")
 
+    def test_key_error_is_not_masked_as_invalid_listing(self):
+        response = Mock(status_code=400, is_redirect=False)
+        response.json.return_value = {"error": {"details": [{"reason": "API_KEY_INVALID"}]}}
+        with patch.dict(os.environ, {"GOOGLE_DRIVE_API_KEY": "test-key"}), patch("backend.drive_import.requests.get", return_value=response):
+            with self.assertRaisesRegex(DriveImportError, "not an OAuth access token"):
+                list_folder_images("https://drive.google.com/drive/folders/folder123456")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,20 +1,20 @@
 # Road Resilience
 
-A prototype for exploring road damage and maintenance review in Bengaluru. It has a React/TypeScript dashboard with a local GeoJSON road map, plus a FastAPI service for YOLO image inference and saved project evidence. The supplied `models/best.pt` matches the checkpoint in `best_model.zip` byte for byte.
+A prototype for exploring road damage and maintenance review in Bengaluru. It has a React/TypeScript dashboard with a local GeoJSON road map, plus a FastAPI service for YOLO image inference and saved project evidence. `models/best.pt` is the checkpoint from the supplied `new_best_model.zip` archive.
 
 ## What is implemented
 
 | Part | Current behavior |
 | --- | --- |
 | Dashboard | Fetches `/api/dashboard` on load and every 30 seconds. It displays saved uploads, optional Mapillary detections, scored road-segment priority totals, model status, and an empty/error state. |
-| Road Map, Road Assessment | Fetch `/api/map` and `/api/observations` every 30 seconds. The map draws scored road geometry and uploaded image locations; the queue shows saved analyses and can recheck GPS from a saved image. |
+| Road Map, Road Assessment | Fetch `/api/map` and `/api/observations` every 30 seconds. The map draws scored local or Overpass road geometry and priority-colored image locations; the queue shows saved analyses, nearby critical facilities, and a 60-day PCI projection, and can recheck GPS from a saved image. |
 | AI Damage Analysis (`/ai-analysis`) | Single-image or sequential queue analysis. One Add button accepts local images, a local folder, public Drive links, or selected Mapillary images. A map-area search shows Mapillary thumbnails, capture dates, and contributor credits. Coordinates come from EXIF, a readable image stamp, or the Mapillary API. |
 | History (`/history`) | Search and page through saved analyses; open each result to view the original and annotated images, detection boxes, coordinates, and PCI/MPI proxies. |
-| Model Performance (`/model-performance`) | Shows checkpoint-linked, user-reported overall and per-class validation results. A matching training `results.csv`, when supplied, takes precedence. |
+| Model Performance (`/model-performance`) | Shows aggregate validation metrics from the active checkpoint's matching `results.csv`, when available, and identifies the checkpoint's class labels. |
 | Backend data endpoints | Read saved uploads and optional Mapillary metadata, detections, and sample images. Uploaded detections include approximate GPS road matching and visual condition proxies. |
 | Workspace entry and Settings | A public “Open workspace” entry leads to the dashboard. Settings explain storage and assessment rules; account authentication is not configured. |
 
-Run AI Damage Analysis to add uploaded detections to the dashboard, map, and review queue. An upload receives coordinates from EXIF GPS or OCR of a labeled decimal coordinate stamp printed on the image. The nearest road line is assigned only within 30 m. Points outside available road coverage still appear on the map, but have no road-segment color. If neither EXIF nor a readable stamp exists, the image remains unlocated. The default checked-in Bengaluru GeoJSON has local feature IDs; an explicit OSMnx import can provide OSM graph-edge IDs. Neither match is field-validated.
+Run AI Damage Analysis to add uploaded detections to the dashboard, map, and review queue. An upload receives coordinates from EXIF GPS or OCR of a labeled decimal coordinate stamp printed on the image. Road matching checks configured local GeoJSON first, then queries the public Overpass API for a drivable OSM road within 30 m. Dynamically matched OSM ways and their geometry are saved in `road_segments`, so later matching can reuse them. If no road is found or Overpass is unavailable, the image still saves and appears as an unassigned map point. Neither GPS matching nor OSM road attributes are field-validated.
 
 ## Repository layout
 
@@ -22,6 +22,7 @@ Run AI Damage Analysis to add uploaded detections to the dashboard, map, and rev
 backend/
   main.py                 FastAPI endpoints, model selection, inference, CSV readers
   assessment.py           EXIF GPS, local road matching, prototype visual scoring
+  overpass_client.py      Public Overpass mirror requests for nearby roads and essential services
   geotag.py               EXIF-first GPS extraction and coordinate-stamp OCR
   annotations.py          Duplicate-box filtering and readable numbered annotations
   database.py             SQLAlchemy observations, detections, road segments, and legacy inference history
@@ -30,8 +31,9 @@ backend/
   requirements-gis.txt    Optional GeoPandas and OSMnx dependencies
   docker-compose.yml      Optional PostgreSQL service
   requirements.txt        Python dependencies
-models/best.pt            Supplied trained YOLO checkpoint
-models/reported_validation.json  User-provided validation output, tied to checkpoint SHA-256
+models/best.pt            Current YOLOv8s checkpoint (2 damage classes)
+models/results.csv        Matching validation metrics from the current training run
+models/args.yaml          Matching training configuration
 frontend/
   public/bengaluru-roads.geojson  Default local road geometry
   src/pages/              Dashboard and other UI pages
@@ -40,7 +42,7 @@ frontend/
   package.json            Frontend scripts and dependencies
 ```
 
-The project now includes the supplied YOLO checkpoint, the app, GeoJSON, user-provided validation values, and two example result images under `frontend/runs/`. The supplied `best_model.zip` contains only `best.pt`; no diagnostic figures were present in that archive. The checkpoint has 11,137,535 parameters before fusion and 11,127,519 after fusion, exactly matching the supplied training summary's fused count. Its depth/width multipliers of 0.33/0.5 are consistent with YOLOv8 small rather than medium. The project does **not** include the original training CSV, RDD2022 images, or the optional Mapillary CSV/image cache. See [Optional backend artifacts](#optional-backend-artifacts).
+The current checkpoint and matching `results.csv` and `args.yaml` came from `new_best_model.zip`. The training configuration identifies a YOLOv8s detector trained for 50 epochs; the checkpoint reports two labels: `D20_Alligator_Crack` and `D40_Pothole`. The final CSV row reports precision 0.89392, recall 0.67355, mAP50 0.75906, and mAP50-95 0.34278. These are training-run validation metrics, not a new independent evaluation. The training dataset and its images are not included. See [Optional backend artifacts](#optional-backend-artifacts).
 
 ## Run locally
 
@@ -74,7 +76,7 @@ By default, inference history and both original and annotated image bytes use `b
 
 The database stores normalized `observations`, `detections`, and `road_segments` tables. Bounding-box center/width/height values are in source-image pixels. The previous `detection_records` table remains for API compatibility; existing uploads are copied into the normalized tables at startup without inventing GPS data.
 
-To import actual OSM drivable edges, install `backend/requirements-gis.txt` and run `python -m backend.import_osm --place "Bengaluru, Karnataka, India"`. The command writes `data/osm_roads.geojson`; restart the backend to use it. Inference does not call OSMnx or Overpass. With GeoPandas installed, matching uses projected EPSG:32643 distances; otherwise it uses a local meter-scale approximation. Set `ROAD_RESILIENCE_ROADS_FILE` to a different GeoJSON before startup to choose another road file. The checked-in road file remains the offline fallback.
+The checked-in Bengaluru GeoJSON is the fast local road source. When it has no road within 30 m, the API queries public Overpass mirrors for nearby drivable OSM ways. Requests include a descriptive User-Agent and an eight-second timeout; mirror/network failures fail open and do not block inference. Matching Overpass ways are cached in `road_segments` and reused locally. A separate Overpass query checks for hospitals, clinics, schools, colleges, fire stations, and police facilities within 300 m; its nullable result is cached per road segment. Overpass does not require an API key, but the public endpoints can be rate-limited or temporarily unavailable. With GeoPandas installed, local matching uses projected EPSG:32643 distances; otherwise it uses a local meter-scale approximation. Set `ROAD_RESILIENCE_ROADS_FILE` to select another local GeoJSON. The optional OSMnx importer can still pre-load a larger network for offline matching.
 
 If the RDD2022 training images and YOLO labels are available, run `python -m backend.preprocess_rdd SOURCE_ROOT OUTPUT_ROOT`. This copies images that pass full OpenCV decoding and normalized bounding-box label checks, and reports corrupt, unannotated, invalid-label, and retained counts. It does not modify the source dataset. The reported Kaggle dataset counts in the attached project description cannot be reproduced here because the raw dataset is not included.
 
@@ -90,7 +92,7 @@ At startup, the API considers the following checkpoint and metrics pairs, select
 | `results/training/yolo11n_india/weights/best.pt` | `results/training/yolo11n_india/results.csv` |
 | `results/training/yolo11n_india_small/weights/best.pt` | `results/training/yolo11n_india_small/results.csv` |
 
-If no complete pair exists, the API uses the supplied `models/best.pt` and shows `models/reported_validation.json` only when its SHA-256 matches that checkpoint. Those values were transcribed from the user's training console output; the validation images and original run files are unavailable locally. A matching CSV takes precedence and must contain numeric final values for `metrics/precision(B)`, `metrics/recall(B)`, `metrics/mAP50(B)`, and `metrics/mAP50-95(B)`. The API counts `.jpg` files in `train/images`, `val/images`, and `test/images` beneath the selected dataset directory; these counts are zero if the dataset is absent.
+The current pair is `models/best.pt` and `models/results.csv`; `models/args.yaml` records its training configuration. The CSV must contain numeric final values for `metrics/precision(B)`, `metrics/recall(B)`, `metrics/mAP50(B)`, and `metrics/mAP50-95(B)`. The API counts `.jpg` files in `train/images`, `val/images`, and `test/images` beneath the selected dataset directory; these counts are unavailable because the training dataset is not included.
 
 Additional optional inputs, relative to the repository root:
 
@@ -111,8 +113,8 @@ The backend reads these local files; it does not fetch images from the live Mapi
 | GET | `/api/roads` | Saved upload and optional Mapillary observations; upload road matches and visual proxy assessments |
 | GET | `/api/dashboard/stats` | Aggregated saved-upload and scored-segment counts |
 | GET | `/api/observations` | Recent saved image queue; optional `priority`, `limit`, `offset` |
-| POST | `/api/observations/{observation_id}/recheck-location` | Read GPS again from a saved original image; refresh road scores |
-| GET | `/api/map` | GeoJSON layer of matched road segments and priority colors |
+| POST | `/api/observations/{observation_id}/recheck-location` | Read GPS again from a saved original image; refresh road scores and return facility/projection fields |
+| GET | `/api/map` | GeoJSON layer of matched local/OSM road segments, priority colors, facility cache, and 60-day PCI projection |
 | GET | `/api/dashboard` | Counts and history from saved uploads and optional Mapillary files |
 | GET | `/api/detections` | Paginated saved upload history (`limit`, `offset`, optional filename `query`); includes total count |
 | GET | `/api/detections/{record_id}` | One saved upload result |
@@ -154,23 +156,20 @@ When two detections cover nearly the same pixels (intersection over union at lea
 | `ROAD_RESILIENCE_DELETE_KEY` | Backend | Unset; deletion is disabled until a secret key is configured |
 | `DATABASE_URL` or `POSTGRES_URL_NON_POOLING` | Backend | SQLite database under `backend/storage/` when neither is set |
 
-### Vercel dashboard and API on separate addresses
+### Current Vercel deployment (API migration pending)
 
-The dashboard is deployed as the `road-maintenance-ai` Vercel project at `https://road-maintenance-ai.vercel.app`, with Root Directory `frontend` and framework Vite. Its `frontend/vercel.json` serves client-side routes such as `/history`. The API is the `road-maintenance-api` project at `https://road-maintenance-api.vercel.app`, built from the repository root with the FastAPI service in the root `vercel.json`. The API needs the repository root for imports and `models/best.pt`; Vercel installs `backend/requirements.txt`, which pins CPU-only PyTorch and headless OpenCV. The root `requirements.txt` includes it for local setup.
+The dashboard is deployed as the `road-maintenance-ai` Vercel project at `https://road-maintenance-ai.vercel.app`, with Root Directory `frontend` and framework Vite. The API is currently deployed separately as `road-maintenance-api` at `https://road-maintenance-api.vercel.app`, from the repository root. This Vercel API deployment includes the large PyTorch/Ultralytics inference stack and checkpoint. The migration below moves the API to Render to reduce Vercel Function Storage use; keep the existing API deployment until the Render API has been verified.
 
-1. Connect both Vercel projects to this GitHub repository. Set the dashboard project Root Directory to `frontend` and framework to Vite; keep the API project at the repository root with the Services framework.
-2. Set dashboard `VITE_API_URL=https://road-maintenance-api.vercel.app` for Production and Preview. Vite embeds this public origin at build time. Set API `ROAD_RESILIENCE_CORS=https://road-maintenance-ai.vercel.app` and `VERCEL_SUPPORT_LARGE_FUNCTIONS=1` for Production and Preview.
-3. Connect a Supabase PostgreSQL resource to the API project. Its `POSTGRES_URL_NON_POOLING` is a session-pooler connection that works with SQLAlchemy and Psycopg. The API uses `DATABASE_URL` if explicitly set, then `POSTGRES_URL_NON_POOLING`, then `POSTGRES_URL`. Do not use the default SQLite file on Vercel because deployment storage is read-only.
-4. Check the API `/health` and `model.status`, then open the dashboard and verify History and images. The four pre-deployment analyses were copied from Neon to Supabase using `python -m backend.migrate_postgres_to_postgres`; that command needs Neon `DATABASE_URL` and prefixed Supabase `SUPABASE_POSTGRES_URL_NON_POOLING` in its environment and requires an empty destination database.
+The dashboard currently calls the separate Vercel API using the Vite build-time `VITE_API_URL`. The active database is Supabase. The current Vercel API can remain available during migration; do not delete it or change the frontend API URL until the Render service has been verified.
 
 To delete a saved analysis, open it from **History**, choose **Delete analysis**, enter the deletion key, and confirm. This removes the analysis, original and annotated image bytes, and its road observation from the active database; the affected road segment score is recalculated. Configure `ROAD_RESILIENCE_DELETE_KEY` as a secret environment variable on the API project, then redeploy the API. Keep the key out of Git and share it only with administrators. Deletion does not remove records from separately retained database backups.
 
-For shared Drive folders, enable the Google Drive API in a Google Cloud project, create an API key restricted to the Drive API, and set `GOOGLE_DRIVE_API_KEY` as a secret in the API Vercel project. Redeploy the API after adding it. Links must be shared as **Anyone with the link**. Individual public image links can use Drive's download link without a key; some Drive files may still require the API key or may not allow automated downloads. Only images directly inside the shared folder are listed (up to 200 per import). Private Drive links require OAuth and are not supported.
+For shared Drive folders, enable the Google Drive API in a Google Cloud project, create an API key restricted to the Drive API, and set `GOOGLE_DRIVE_API_KEY` as a secret in the API service. Redeploy the API after adding it. Links must be shared as **Anyone with the link**. Individual public image links can use Drive's download link without a key; some Drive files may still require the API key or may not allow automated downloads. Only images directly inside the shared folder are listed (up to 200 per import). Private Drive links require OAuth and are not supported.
 
 ### Live Mapillary imagery
 
 1. Create or use a client access token from the [Mapillary developer dashboard](https://www.mapillary.com/dashboard/developers). Store it as `MAPILLARY_ACCESS_TOKEN` in the repository root `.env` or `.env.local`. The backend reads these files at startup without overriding already-set environment variables. These files are ignored by Git and Vercel uploads. Keep the token on the backend; do not prefix it with `VITE_`.
-2. For the hosted app, set that variable as a secret on the **API** Vercel project and redeploy it. The dashboard needs no Mapillary token.
+2. For the hosted app, set that variable as a secret on the API service and redeploy it. The dashboard needs no Mapillary token.
 3. Open **AI Damage Analysis → Bulk upload → Mapillary imagery**. Pan/zoom the map to a small road area, choose **Search this area**, select images, use the existing **Add to queue** button, then **Run analysis**. Up to 24 images are shown per UI search; the initial map centers on Bengaluru. Search supports other areas, while road snapping uses only the configured road geometry.
 4. Each selected image is downloaded by ID through the server and analyzed one at a time with the same YOLO, GIS, PCI/MPI proxy, and persistence pipeline. Mapillary API coordinates are used because downloaded thumbnails may omit EXIF. Original and annotated bytes plus source ID, creator, image URL, capture time, coordinate source, and license are stored in the active database. A unique source-image index prevents repeated analyses of the same Mapillary image from inflating road scores. Existing records remain readable after the additive schema update.
 
@@ -180,27 +179,29 @@ Run `python -m backend.check_mapillary --download` to verify token access, Benga
 
 Dense Mapillary searches can time out at the provider. The backend searches larger map areas as four smaller requests in parallel, with a bounded fallback for smaller areas that time out. It merges and deduplicates the results; if only part of the area loads, the picker keeps those images selectable and shows a partial-search notice. Zoom in to a shorter road section to retry areas that remain unavailable. Authentication and rate-limit errors are reported directly.
 
-PyTorch, Ultralytics, OpenCV, OCR, and the checkpoint make the backend a large Python function. A deployed build and public API health check passed; a live image inference request has not yet been tested. Vercel Functions limit request bodies to 4.5 MB, so larger image uploads need a direct-to-storage flow or another backend host. The local SQLite file and uploaded images are ignored by Git. Public image endpoints and upload APIs have no authentication, so restrict access before using sensitive imagery.
+PyTorch, Ultralytics, OpenCV, OCR, and the checkpoint make the backend a large Python deployment. Vercel Functions limit request bodies to 4.5 MB, so larger image uploads need a direct-to-storage flow or another backend host. The local SQLite file and uploaded images are ignored by Git. Public image endpoints and upload APIs have no authentication, so restrict access before using sensitive imagery.
 
-### Alternative: Vercel frontend + Render backend
+### Move the API to Render and keep the frontend on Vercel
 
-1. Push this repository, including `models/best.pt`, to GitHub. The local SQLite database under `backend/storage/` stays out of Git.
-2. In Render, create a Blueprint from the repository's `render.yaml`. Its Docker web service runs FastAPI and the checkpoint; its managed PostgreSQL database stores observations and both image versions. The checked-in plans (`1c-2g` web, `0.1c-256mb` database) are **paid**. Review the charges before creating them. A free PostgreSQL preview expires after 30 days, and the free web instance's 512 MB memory may be insufficient for PyTorch inference.
-3. If using a separate Vercel frontend project, import the same repository with **Root Directory** `frontend`, **Framework Preset** Vite, **Build Command** `npm run build`, and **Output Directory** `dist`. Set `VITE_API_URL` to the Render service's HTTPS origin (no trailing slash), then deploy or redeploy. Vite embeds this value during the build.
-4. In the Render web service, set `ROAD_RESILIENCE_CORS` to the Vercel production origin, such as `https://your-project.vercel.app`, and redeploy. For additional preview domains, add their origins separated by commas. Check Render `/health`, then open the Vercel site and run one test upload.
-5. To bring the existing local history online, set `DATABASE_URL` on your local machine to the **external** Render PostgreSQL URL and run `python -m backend.migrate_sqlite_to_postgres`. This one-time command requires an empty destination database, copies all image bytes and records, and prints table row counts. Do not commit the URL or local database. Run it before new uploads are added to the hosted database.
+This setup keeps the existing Supabase database; it does not provision a second Render database or require a data migration.
 
-In this alternative setup, the frontend and backend are separate sites. The backend's root path is not the dashboard; `/health` and `/docs` are available there.
+1. Push the repository, including `models/best.pt`, to GitHub. Keep `.env*`, `backend/storage/`, and local databases out of Git.
+2. Create a Render Blueprint from `render.yaml` and review the paid `1c-2g` Docker web service before confirming. The blueprint intentionally does not create a database. The Render service needs the existing Supabase PostgreSQL connection string, deletion secret, and Mapillary token. Enter these only in Render's secret environment-variable form; do not commit them. Use the Supabase session-pooler connection string so existing analyses remain visible.
+3. Wait for the service URL, then check `https://<render-service>.onrender.com/health`. Confirm the response reports the model ready before changing the frontend.
+4. In the Vercel frontend project, set Production `VITE_API_URL` to the Render service's HTTPS origin (no trailing slash), then redeploy the frontend. Vite embeds this public URL at build time.
+5. In Render, set `ROAD_RESILIENCE_CORS` to `https://road-maintenance-ai.vercel.app` (the production value in the blueprint). Add any preview origins as needed. Test dashboard loading, History/images, Mapillary, and one controlled image upload.
+6. Once the Vercel frontend is confirmed to use Render, disable Git auto-deploys for the old Vercel API project and remove old preview/failed API deployments you no longer need. Keep the current production API deployment until cutover is verified, then delete the old Vercel API project if it is no longer needed. This prevents repeated large ML function deployments from continuing to consume Vercel Function Storage.
 
+The frontend and backend are separate sites. The API root path is not the dashboard; `/health` and `/docs` are available there. Render's `1c-2g` service plan is paid. Do not replace `DATABASE_URL` with a new Render database unless intentionally planning a separate data migration.
 ## Scope and limitations
 
 - The map and assessment use saved uploads. A point can use EXIF GPS or a readable coordinate stamp. Road-segment colors require a match within 30 m and a scored D00/D10/D20/D40 detection. Optional Mapillary CSV observations remain outside the normalized upload and road-segment scores.
-- The attached specification's formula is implemented as a **visual proxy**: `PCI = max(0, 100 - sum(class weight × detection count))`, with D00/D10=8, D20=15, and D40=20. `MPI = (100 - PCI) × road-class factor`, with major=1.5, collector=1.2, and local/unknown=1.0. High is MPI ≥50, medium ≥25, otherwise low. The checkpoint's fifth `Other_Damage` class has no specified weight and is excluded from scoring. These values are not ASTM PCI or measured traffic criticality. Images without a scored class remain unassessed.
+- The assessment is a **visual proxy**, not a certified PCI survey. For each observation, `PCI = max(0, 100 - sum(class weight × detection count))`, with D00/D10=8, D20=15, and D40=20. For a road segment, PCI averages the per-observation penalties so repeated uploads do not accumulate without bound. `MPI = min(100, (100 - PCI) × road exposure × facility factor)`: trunk/primary exposure=1.5, secondary=1.3, tertiary=1.2, other/local=1.0; segments within 300 m of a cached essential service receive a 1.2 facility factor. Priority is High at MPI ≥50, Medium at ≥25, otherwise Low. The 60-day estimate subtracts `0.12 × road exposure × 1.2` PCI points per day (capped at zero); days-to-critical estimates time to PCI 50. This is an illustrative projection, not a trained deterioration forecast. The active checkpoint detects D20 and D40 only; D00/D10 weights remain for compatible checkpoints. Images without a scored class remain unassessed.
 - The shown per-class and overall validation values come from the user-provided training output, are labeled as reported, and are linked to the checkpoint hash. They are not a local validation rerun and do not measure accuracy on uploaded images or Mapillary deployment observations. If a matching training CSV is added, its aggregate values replace the reported summary.
-- GPS snapping uses the checked-in Bengaluru GeoJSON by default and a 30 m threshold. It does not validate direction, GPS accuracy, imagery position, or road ownership. The default file has only a small local coverage area and no verified OSM graph-edge IDs. There is no authenticated account system, traffic or maintenance history, or environmental vulnerability model. Uploaded image bytes and detection history are stored in the database; a public deployment needs access control before accepting sensitive uploads.
-- The supplied training console output reports 5,758 validation images, 9,740 instances, class metrics, and 4.6 ms inference in its training environment. The archive supplies only a YOLOv8s-scale checkpoint; the training CSV, validation images, and raw data remain absent. The UI labels these figures as user-reported rather than independently verified.
+- GPS snapping uses checked-in local GeoJSON first, then live Overpass within 30 m. Results depend on public OSM coverage and Overpass availability and do not validate direction, GPS accuracy, imagery position, road ownership, or road condition. Facility lookups are cached once per segment, including a negative result after a successful query. There is no authenticated account system, measured traffic or maintenance history, or validated deterioration model. Uploaded image bytes and detection history are stored in the database; a public deployment needs access control before accepting sensitive uploads.
+- The current training archive includes aggregate validation metrics in `models/results.csv`, but not per-class validation metrics, validation images, or the training dataset. Its final reported inference time should not be treated as deployed service latency. The checkpoint and CSV are used directly by the model-performance page; these values have not been independently reproduced here.
 
 ## Development checks
 
 From `frontend/`, run `npm run build` for TypeScript and production build validation, and `npm run lint` for ESLint.
-From the repository root, run `python -m unittest backend.test_pipeline -v` to check GPS parsing, road matching, scoring, and upload persistence. The API integration test uses a temporary SQLite database and the supplied checkpoint.
+From the repository root, run `python -m unittest backend.test_pipeline backend.test_overpass -v` to check GPS parsing, road matching, scoring, upload persistence, Overpass parsing, timeout fallback, facility detection, and cache behavior. The API integration test uses a temporary SQLite database and the supplied checkpoint. Build the UI with `npm --prefix frontend run build`.

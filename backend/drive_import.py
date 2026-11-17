@@ -93,9 +93,17 @@ def list_folder_images(link: str) -> list[dict[str, str]]:
         response = _request_google("https://www.googleapis.com/drive/v3/files", params=params, headers=headers)
         try:
             if response.status_code != 200:
+                if response.status_code == 400:
+                    body = response.json()
+                    error = body.get("error", {}) if isinstance(body, dict) else {}
+                    reasons = [item.get("reason") for item in error.get("details", []) if isinstance(item, dict)]
+                    if "API_KEY_INVALID" in reasons:
+                        raise DriveImportError("Google rejected the Drive API key. Use a Google Cloud API key, not an OAuth access token.")
                 raise DriveImportError("Could not list this folder. Set it to Anyone with the link and check the Drive API key.")
             data = response.json()
         except (requests.RequestException, ValueError) as exc:
+            if isinstance(exc, DriveImportError):
+                raise
             raise DriveImportError("Google Drive returned an invalid folder listing.") from exc
         finally:
             response.close()

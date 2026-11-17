@@ -5,6 +5,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends libglib2.0-0 li
 COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install -r backend/requirements.txt
 COPY backend/*.py ./backend/
-COPY models/best.pt models/reported_validation.json ./models/
+COPY models/best.pt models/results.csv models/args.yaml ./models/
 COPY frontend/public/bengaluru-roads.geojson ./frontend/public/bengaluru-roads.geojson
 CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
