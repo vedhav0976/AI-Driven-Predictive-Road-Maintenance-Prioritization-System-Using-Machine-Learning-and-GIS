@@ -925,13 +925,41 @@ def get_detection(record_id: int) -> dict[str, Any]:
         }
 
 
-@app.delete("/api/detections/{record_id}")
-def delete_detection(record_id: int, x_delete_key: str | None = Header(default=None)) -> dict[str, Any]:
+class BulkDeleteRequest(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=200)
+
+
+def require_delete_key(value: str | None) -> None:
     configured_key = os.getenv("ROAD_RESILIENCE_DELETE_KEY")
     if not configured_key:
         raise HTTPException(status_code=503, detail="Analysis deletion is not configured.")
-    if not x_delete_key or not secrets.compare_digest(x_delete_key, configured_key):
+    if not value or not secrets.compare_digest(value, configured_key):
         raise HTTPException(status_code=403, detail="Invalid deletion key.")
+
+
+@app.post("/api/detections/bulk-delete")
+def bulk_delete_detections(payload: BulkDeleteRequest, x_delete_key: str | None = Header(default=None)) -> dict[str, Any]:
+    require_delete_key(x_delete_key)
+    ids = payload.ids
+    if len(ids) != len(set(ids)) or any(record_id <= 0 for record_id in ids):
+        raise HTTPException(status_code=422, detail="Select unique, valid analysis IDs.")
+    with get_session() as session:
+        existing_ids = set(session.scalars(select(DetectionRecord.id).where(DetectionRecord.id.in_(ids))))
+        missing_ids = sorted(set(ids) - existing_ids)
+        if missing_ids:
+            raise HTTPException(status_code=404, detail=f"Analyses not found: {', '.join(map(str, missing_ids))}.")
+        affected_segments: set[str] = set()
+        for record_id in ids:
+            delete_analysis(session, record_id, affected_segments)
+        for segment_id in affected_segments:
+            refresh_road_segment(session, segment_id)
+        session.commit()
+    return {"deleted_ids": ids, "count": len(ids)}
+
+
+@app.delete("/api/detections/{record_id}")
+def delete_detection(record_id: int, x_delete_key: str | None = Header(default=None)) -> dict[str, Any]:
+    require_delete_key(x_delete_key)
     with get_session() as session:
         filename = delete_analysis(session, record_id)
         if filename is None:

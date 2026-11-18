@@ -250,7 +250,7 @@ def refresh_road_segment(session: Session, segment_id: str | None) -> None:
                 record.pci_proxy, record.mpi_proxy, record.priority = item_pci, item_mpi, item_priority
 
 
-def delete_analysis(session: Session, record_id: int) -> str | None:
+def delete_analysis(session: Session, record_id: int, segments_to_refresh: set[str] | None = None) -> str | None:
     """Remove one analysis, both saved images, and its normalized assessment rows."""
     record = session.get(DetectionRecord, record_id)
     if record is None:
@@ -265,7 +265,11 @@ def delete_analysis(session: Session, record_id: int) -> str | None:
     filename = record.original_filename
     session.delete(record)
     session.flush()
-    refresh_road_segment(session, segment_id)
+    if segments_to_refresh is not None:
+        if segment_id:
+            segments_to_refresh.add(segment_id)
+    else:
+        refresh_road_segment(session, segment_id)
     return filename
 
 
