@@ -29,7 +29,6 @@ function Settings() {
           <div><span className="workspace-rule-number">03</span><h3>Scores support review</h3><p>PCI and MPI are visual, count-based proxies. They help organize observations and require engineering validation.</p></div>
         </div>
       </section>
-      <div className="workspace-reference-note">Model validation metrics describe the reported training run. They do not measure accuracy on a newly uploaded image. <Link to="/model-performance">View model performance<ArrowUpRight size={14} /></Link></div>
     </div>
   );
 }

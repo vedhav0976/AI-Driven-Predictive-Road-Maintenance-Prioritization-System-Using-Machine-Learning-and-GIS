@@ -5,7 +5,7 @@ import { apiFetch, type DashboardData } from "../api";
 
 type Priority = "High" | "Medium" | "Low";
 const PRIORITIES: Priority[] = ["High", "Medium", "Low"];
-const PRIORITY_COLORS: Record<Priority, string> = { High: "#d85b52", Medium: "#d49b32", Low: "#16806a" };
+const PRIORITY_COLORS: Record<Priority, string> = { High: "#dc2626", Medium: "#f59e0b", Low: "#2563eb" };
 const DASHBOARD_TIMEOUT_MS = 20_000;
 const damageLabel = (value: string) => value.replace(/^D\d+_/, "").replaceAll("_", " ");
 
@@ -40,15 +40,8 @@ function Dashboard() {
     return () => { disposed = true; window.clearTimeout(timeout); controller.abort(); };
   }, [refreshKey]);
 
-  useEffect(() => {
-    const interval = window.setInterval(() => setRefreshKey((key) => key + 1), 30_000);
-    return () => window.clearInterval(interval);
-  }, []);
-
   const categoryRows = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const item of data?.history ?? []) counts.set(item.damage_type, (counts.get(item.damage_type) ?? 0) + 1);
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    return Object.entries(data?.damage_distribution ?? {}).sort((a, b) => b[1] - a[1]);
   }, [data]);
   const history = useMemo(() => (data?.history ?? []).filter((item) => damageType === "All" || item.damage_type === damageType), [damageType, data]);
   const priorityCounts = data?.priority_distribution;
@@ -61,7 +54,7 @@ function Dashboard() {
       <div className="page-actions"><Link className="button-secondary" to="/road-map">Explore map<ArrowUpRight size={17} /></Link><Link className="button-primary" to="/ai-analysis"><BrainCircuit size={17} />Analyze images</Link></div>
     </section>
     <div className="dashboard-source-row">
-      <span className={`status-badge ${loading ? "" : error ? "warning" : "ready"}`}>{loading ? "Connecting…" : error ? "Connection interrupted" : "Live data · refreshes every 30 seconds"}</span>
+      <span className={`status-badge ${loading ? "" : error ? "warning" : "ready"}`}>{loading ? "Connecting…" : error ? "Connection interrupted" : "Live data · refresh when needed"}</span>
       <button className="panel-action" type="button" onClick={refresh} disabled={loading || refreshing}><RefreshCw size={16} />{refreshing ? "Refreshing…" : "Refresh data"}</button>
     </div>
     {error && <div className="map-notice" role="alert"><AlertTriangle size={18} /><span>We could not refresh the dashboard. {error}{data ? " The last loaded results are still shown below." : " Try Refresh data to reconnect."}</span></div>}
@@ -76,7 +69,7 @@ function Dashboard() {
         <Stat label="Road segments" value={String(data.road_segments)} detail="Matched to available road geometry" />
       </section>
       <section className="dashboard-grid dashboard-summary-grid">
-        <div className="panel"><div className="panel-header"><div><p className="panel-kicker">MAINTENANCE PRIORITY</p><h2>Road segments by priority</h2></div><BarChart3 size={21} /></div><div className="chart-list">{PRIORITIES.map((priority) => <ChartRow key={priority} label={priority} value={priorityCounts?.[priority] ?? 0} total={priorityTotal} color={PRIORITY_COLORS[priority]} />)}{!priorityTotal && <p className="muted-text">Road scores appear after damage is detected on a GPS-matched image.</p>}</div></div>
+        <div className="panel"><div className="panel-header"><div><p className="panel-kicker">MAINTENANCE PRIORITY</p><h2>Saved analyses by priority</h2></div><BarChart3 size={21} /></div><div className="chart-list">{PRIORITIES.map((priority) => <Link key={priority} className="priority-chart-link" to={`/road-assessment?priority=${priority}`} aria-label={`View ${priority.toLowerCase()} priority assessments`}><ChartRow label={priority} value={priorityCounts?.[priority] ?? 0} total={priorityTotal} color={PRIORITY_COLORS[priority]} /></Link>)}{!priorityTotal && <p className="muted-text">Priorities appear after an analysis detects scored damage. GPS is needed to color a road on the map.</p>}</div></div>
         <div className="panel"><div className="panel-header"><div><p className="panel-kicker">DETECTED DAMAGE</p><h2>Damage profile</h2></div><ClipboardCheck size={21} /></div><div className="chart-list">{categoryRows.map(([label, value]) => <ChartRow key={label} label={damageLabel(label)} value={value} total={data.detections} color="#16806a" />)}{!categoryRows.length && <p className="muted-text">Damage categories will appear after an image analysis finds visible damage.</p>}</div></div>
       </section>
       <section className="panel dashboard-recent-panel">
@@ -89,13 +82,6 @@ function Dashboard() {
           <div className="table-wrapper"><table className="metrics-table"><thead><tr><th>Image</th><th>Damage</th><th>Confidence</th><th>Source</th><th>Location</th><th>Priority</th></tr></thead><tbody>{history.map((item, index) => <tr key={`${item.filename}-${index}`}><td>{item.filename || "Unknown image"}</td><td>{damageLabel(item.damage_type)}</td><td>{(item.confidence * 100).toFixed(1)}%</td><td>{item.source === "mapillary_inference" ? "Mapillary analysis" : item.source === "uploaded_inference" ? "Image analysis" : "Mapillary file"}</td><td>{item.location_status === "road_snapped" ? item.road_id : item.location_status === "geolocated_observation" ? "GPS (unmatched)" : item.location_status === "outside_road_coverage" ? "Outside coverage" : "No GPS"}</td><td>{item.priority ? <span className={`priority-pill ${item.priority.toLowerCase()}`}>{item.priority}</span> : "—"}</td></tr>)}</tbody></table></div>
           {!history.length && <div className="empty-state"><ClipboardCheck size={28} /><h3>No observations to show</h3><p>{data.detections ? "Choose another damage type to see its observations." : "New detections will appear here after image analysis."}</p></div>}
         </div>
-        <div className="panel"><div className="panel-header"><div><p className="panel-kicker">ANALYSIS SERVICE</p><h2>Model &amp; data</h2></div><BrainCircuit size={21} /></div><div className="priority-summary">
-          <div className="dashboard-model-status"><strong>{data.model.name}</strong><span className={`status-badge ${data.model.status === "ready" ? "ready" : data.model.status === "unavailable" ? "warning" : ""}`}>{data.model.status === "available" ? "Loads on first analysis" : data.model.status}</span></div>
-          <p>Validation evidence: {data.model_metrics.reported ? "training-reported results" : data.model_metrics.available ? "saved run results" : "not supplied"}.</p>
-          <p>{data.unmatched_observations} observation{data.unmatched_observations === 1 ? " is" : "s are"} outside a matched road segment.</p>
-          <Link className="panel-action" to="/model-performance">Explore model results<ArrowUpRight size={15} /></Link>
-          <details className="data-disclosure"><summary>How to interpret these results</summary>{data.limitations.map((limitation) => <p key={limitation} className="muted-copy">{limitation}</p>)}</details>
-        </div></div>
       </section>
     </>}
   </div>;

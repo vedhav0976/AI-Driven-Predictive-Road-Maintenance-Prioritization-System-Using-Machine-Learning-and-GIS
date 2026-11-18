@@ -9,6 +9,7 @@ import logging
 import os
 import secrets
 from contextlib import asynccontextmanager
+from functools import lru_cache
 from pathlib import Path
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
@@ -355,6 +356,7 @@ def model_info() -> dict[str, Any]:
     }
 
 
+@lru_cache(maxsize=1)
 def parse_metrics() -> dict[str, Any]:
     rows = valid_metric_rows(METRICS_CSV)
     if not rows:
@@ -590,25 +592,34 @@ def get_roads() -> dict[str, Any]:
 def get_dashboard() -> dict[str, Any]:
     images = read_csv(MAPILLARY_CSV)
     observations = mapillary_observations()
-    uploads = saved_inferences()
-    uploaded_observations = upload_observations(uploads)
     with get_session() as session:
-        scored_segments = session.scalars(select(RoadSegment)).all()
-    geolocated = [item for item in observations if item["location_status"] == "geolocated_observation"]
-    geolocated += [item for item in uploaded_observations if item["latitude"] is not None]
-    distribution = {
-        level: sum(1 for item in scored_segments if item.priority_tier == level)
-        for level in ("High", "Medium", "Low")
-    }
+        upload_count = session.scalar(select(func.count()).select_from(DetectionRecord)) or 0
+        upload_detections = session.scalar(select(func.coalesce(func.sum(DetectionRecord.detection_count), 0))) or 0
+        geolocated_detections = session.scalar(select(func.coalesce(func.sum(DetectionRecord.detection_count), 0)).where(DetectionRecord.latitude.is_not(None))) or 0
+        unmatched_detections = session.scalar(select(func.coalesce(func.sum(DetectionRecord.detection_count), 0)).where(DetectionRecord.road_id.is_(None))) or 0
+        scored_segments = session.scalar(select(func.count()).select_from(RoadSegment).where(RoadSegment.pci_score.is_not(None))) or 0
+        priority_rows = session.execute(select(DetectionRecord.priority, func.count()).where(DetectionRecord.priority.is_not(None)).group_by(DetectionRecord.priority)).all()
+        damage_rows = session.execute(select(DamageDetection.class_name, func.count()).group_by(DamageDetection.class_name)).all()
+        uploads = session.scalars(select(DetectionRecord).order_by(DetectionRecord.created_at.desc(), DetectionRecord.id.desc()).limit(50)).all()
+    uploaded_observations = upload_observations(uploads)
+    distribution = {level: next((count for tier, count in priority_rows if tier == level), 0) for level in ("High", "Medium", "Low")}
+    damage_distribution = {name: count for name, count in damage_rows}
+    if not damage_distribution:
+        for observation in uploaded_observations:
+            name = observation["damage_type"]
+            damage_distribution[name] = damage_distribution.get(name, 0) + 1
+    for observation in observations:
+        name = observation["damage_type"]
+        damage_distribution[name] = damage_distribution.get(name, 0) + 1
     return {
-        "images_processed": len(images) + len(uploads),
-        "uploaded_images": len(uploads),
-        "detections": len(observations) + len(uploaded_observations),
-        "geolocated_observations": len(geolocated),
-        "unmatched_observations": len(observations) + len(uploaded_observations)
-        - sum(1 for item in uploaded_observations if item["road_id"]),
-        "road_segments": sum(1 for item in scored_segments if item.pci_score is not None),
+        "images_processed": len(images) + upload_count,
+        "uploaded_images": upload_count,
+        "detections": len(observations) + upload_detections,
+        "geolocated_observations": sum(item["location_status"] == "geolocated_observation" for item in observations) + geolocated_detections,
+        "unmatched_observations": len(observations) + unmatched_detections,
+        "road_segments": scored_segments,
         "priority_distribution": distribution,
+        "damage_distribution": damage_distribution,
         "model_metrics": parse_metrics(),
         "model": model_info(),
         "recent_uploads": [
@@ -694,11 +705,17 @@ def get_observations(priority: str | None = None, limit: int = 50, offset: int =
         source_records = {record.id: record for record in session.scalars(
             select(DetectionRecord).where(DetectionRecord.id.in_([item.legacy_record_id for item in observations]))
         ).all()}
+        observation_ids = [item.id for item in observations]
+        detections_by_observation: dict[int, list[DamageDetection]] = {item.id: [] for item in observations}
+        if observation_ids:
+            for detection in session.scalars(select(DamageDetection).where(DamageDetection.observation_id.in_(observation_ids))):
+                detections_by_observation[detection.observation_id].append(detection)
+        segment_ids = {item.segment_id for item in observations if item.segment_id}
+        segments = {segment.segment_id: segment for segment in session.scalars(select(RoadSegment).where(RoadSegment.segment_id.in_(segment_ids)))} if segment_ids else {}
         records = []
         for item in observations:
-            detections = session.scalars(
-                select(DamageDetection).where(DamageDetection.observation_id == item.id)
-            ).all()
+            detections = detections_by_observation[item.id]
+            segment = segments.get(item.segment_id)
             records.append({
                 "id": item.id, "filename": item.original_filename,
                 "latitude": item.latitude, "longitude": item.longitude,
@@ -708,9 +725,9 @@ def get_observations(priority: str | None = None, limit: int = 50, offset: int =
                 **(record_source(source_records[item.legacy_record_id]) if item.legacy_record_id in source_records else {}),
                 "road_id": item.segment_id,
                 "pci_score": item.pci_score, "mpi_score": item.mpi_score,
-                **({"near_critical_facility": (segment := session.get(RoadSegment, item.segment_id)).near_critical_facility,
+                **({"near_critical_facility": segment.near_critical_facility,
                    "critical_facility_name": segment.critical_facility_name, "projected_pci_60d": segment.projected_pci_60d,
-                   "days_to_critical": segment.days_to_critical} if item.segment_id and session.get(RoadSegment, item.segment_id) else {}),
+                   "days_to_critical": segment.days_to_critical} if segment else {}),
                 "priority": item.priority_tier,
                 "detection_count": len(detections),
                 "damage_types": sorted({detection.class_name for detection in detections}),
@@ -788,7 +805,7 @@ def get_priority_map() -> dict[str, Any]:
                         "critical_facility_name": segment.critical_facility_name,
                         "projected_pci_60d": segment.projected_pci_60d,
                         "days_to_critical": segment.days_to_critical,
-                        "color": {"High": "#EF4444", "Medium": "#F59E0B", "Low": "#10B981"}.get(segment.priority_tier, "#94a3b8"),
+                        "color": {"High": "#dc2626", "Medium": "#f59e0b", "Low": "#2563eb"}.get(segment.priority_tier, "#64748b"),
                     },
                 }
                 for segment in segments
@@ -977,10 +994,10 @@ def analyze_image_content(
     try:
         source_image = Image.open(io.BytesIO(content))
         source_format = source_image.format
-        image_location = extract_image_location(source_image)
-        latitude, longitude, location_source = provider_location or (
-            image_location if image_location[0] is not None else client_exif_location or image_location
-        )
+        if provider_location or client_exif_location:
+            latitude, longitude, location_source = provider_location or client_exif_location
+        else:
+            latitude, longitude, location_source = extract_image_location(source_image)
         image = source_image.convert("RGB")
     except Exception as exc:
         raise HTTPException(status_code=400, detail="The uploaded file is not a readable image.") from exc

@@ -11,7 +11,7 @@ USER_AGENT = "RoadResilienceProject/1.0"
 def _query(query: str) -> dict[str, Any] | None:
     for endpoint in ENDPOINTS:
         try:
-            with httpx.Client(timeout=8.0, headers={"User-Agent": USER_AGENT}) as client:
+            with httpx.Client(timeout=4.0, headers={"User-Agent": USER_AGENT}) as client:
                 response = client.post(endpoint, data={"data": query})
                 response.raise_for_status()
                 payload = response.json()

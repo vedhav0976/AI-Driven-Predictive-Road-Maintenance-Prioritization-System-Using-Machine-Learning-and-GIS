@@ -1,5 +1,4 @@
 import {
-  BarChart3,
   BrainCircuit,
   ChevronRight,
   ClipboardCheck,
@@ -17,6 +16,9 @@ import {
 } from "lucide-react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Suspense, useEffect, useRef, useState } from "react";
+import { lazy } from "react";
+
+const AIDamageAnalysis = lazy(() => import("../pages/AIDamageAnalysis"));
 
 const navigation = [
   {
@@ -44,11 +46,6 @@ const navigation = [
     path: "/history",
     icon: History,
   },
-  {
-    label: "Model Performance",
-    path: "/model-performance",
-    icon: BarChart3,
-  },
 ];
 
 const secondaryNavigation = [
@@ -71,7 +68,15 @@ function AppLayout() {
   const menuRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const location = useLocation();
+  const showAnalysis = location.pathname === "/ai-analysis";
+  const [analysisVisited, setAnalysisVisited] = useState(showAnalysis);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!showAnalysis) return;
+    const frame = window.requestAnimationFrame(() => setAnalysisVisited(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, [showAnalysis]);
 
   useEffect(() => { window.scrollTo({ top: 0 }); }, [location.pathname]);
 
@@ -247,7 +252,8 @@ function AppLayout() {
         </header>
 
         <main className="page-content" id="workspace-content" tabIndex={-1}>
-          <Suspense fallback={<div className="loading-state" role="status"><span className="loading-spinner" />Loading workspace…</div>}><Outlet /></Suspense>
+          {(analysisVisited || showAnalysis) && <div hidden={!showAnalysis}><Suspense fallback={<div className="loading-state" role="status"><span className="loading-spinner" />Loading analysis…</div>}><AIDamageAnalysis /></Suspense></div>}
+          <div hidden={showAnalysis}><Suspense fallback={<div className="loading-state" role="status"><span className="loading-spinner" />Loading workspace…</div>}><Outlet /></Suspense></div>
         </main>
         <footer className="workspace-footer"><span><RouteIcon size={14} />Road Resilience</span><span>AI assisted assessments · Review before planning maintenance</span></footer>
       </div>

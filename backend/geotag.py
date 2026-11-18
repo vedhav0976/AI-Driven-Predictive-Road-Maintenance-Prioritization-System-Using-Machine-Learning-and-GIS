@@ -64,16 +64,15 @@ def extract_image_location(image: Image.Image) -> tuple[float | None, float | No
         rgb = image.convert("RGB")
         # Camera apps usually place the stamp at an edge. This avoids OCR on road texture.
         width, height = rgb.size
-        crops = (
-            rgb.crop((0, int(height * 0.60), width, height)),
-            rgb.crop((0, 0, width, int(height * 0.40))),
-        )
-        for crop in crops:
-            output = ocr_engine()(np.asarray(crop))
-            lines = list(output.txts or ())
-            latitude, longitude = parse_overlay_coordinates(lines)
-            if latitude is not None and longitude is not None:
-                return latitude, longitude, "image_overlay"
+        top_height = int(height * 0.40)
+        bottom = rgb.crop((0, int(height * 0.60), width, height))
+        stamp_region = Image.new("RGB", (width, max(1, top_height + bottom.height)))
+        stamp_region.paste(rgb.crop((0, 0, width, top_height)), (0, 0))
+        stamp_region.paste(bottom, (0, top_height))
+        output = ocr_engine()(np.asarray(stamp_region))
+        latitude, longitude = parse_overlay_coordinates(list(output.txts or ()))
+        if latitude is not None and longitude is not None:
+            return latitude, longitude, "image_overlay"
     except Exception:
         logger.exception("Unable to read coordinate text from image")
     return None, None, None

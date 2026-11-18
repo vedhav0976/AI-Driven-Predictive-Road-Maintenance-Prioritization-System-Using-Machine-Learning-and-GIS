@@ -79,6 +79,7 @@ class AssessmentTests(unittest.TestCase):
         self.assertEqual(result["pci_proxy"], 80)
         self.assertEqual(result["mpi_proxy"], 20)
         self.assertEqual(result["priority"], "Low")
+        self.assertEqual(score_detections(detections * 2, 100, 100)["priority"], "Medium")
         self.assertEqual(score_detections(detections * 2, 100, 100, "primary")["mpi_proxy"], 60)
         self.assertIsNone(score_detections([], 100, 100)["pci_proxy"])
 

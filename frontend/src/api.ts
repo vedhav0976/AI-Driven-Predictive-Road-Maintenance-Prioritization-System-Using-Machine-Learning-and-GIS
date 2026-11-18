@@ -115,6 +115,7 @@ export type DashboardData = {
   unmatched_observations: number;
   road_segments: number;
   priority_distribution: Record<string, number>;
+  damage_distribution: Record<string, number>;
   model_metrics: Metrics;
   model: ModelInfo;
   recent_uploads: Array<{
@@ -209,7 +210,7 @@ export type PriorityMap = {
   features: Array<{
     type: "Feature";
     id: string;
-    geometry: { type: "LineString"; coordinates: number[][] };
+    geometry: { type: "LineString"; coordinates: number[][] } | { type: "MultiLineString"; coordinates: number[][][] };
     properties: {
       road_name: string | null;
       road_type: string | null;
@@ -250,7 +251,19 @@ export type MapillaryData = {
 };
 
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, options);
+  const isRead = !options?.method || options.method.toUpperCase() === "GET";
+  const signal = isRead
+    ? options?.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000)
+    : options?.signal;
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, { ...options, signal });
+  } catch (reason) {
+    if (reason instanceof DOMException && reason.name === "TimeoutError") {
+      throw new Error("The analysis service took too long to respond. Try again.", { cause: reason });
+    }
+    throw reason;
+  }
   if (!response.ok) {
     let detail = `Request failed (${response.status})`;
     try {

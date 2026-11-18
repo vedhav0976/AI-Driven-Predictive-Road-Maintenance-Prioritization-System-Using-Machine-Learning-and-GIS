@@ -6,9 +6,7 @@ import Login from "./pages/Login";
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const RoadMap = lazy(() => import("./pages/RoadMap"));
 const RoadAssessment = lazy(() => import("./pages/RoadAssessment"));
-const AIDamageAnalysis = lazy(() => import("./pages/AIDamageAnalysis"));
 const History = lazy(() => import("./pages/History"));
-const ModelPerformance = lazy(() => import("./pages/ModelPerformance"));
 const ProjectOverview = lazy(() => import("./pages/ProjectOverview"));
 const Settings = lazy(() => import("./pages/Settings"));
 
@@ -22,10 +20,10 @@ function App() {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/road-map" element={<RoadMap />} />
           <Route path="/road-assessment" element={<RoadAssessment />} />
-          <Route path="/ai-analysis" element={<AIDamageAnalysis />} />
+          <Route path="/ai-analysis" element={null} />
           <Route path="/history" element={<History />} />
           <Route path="/history/:recordId" element={<History />} />
-          <Route path="/model-performance" element={<ModelPerformance />} />
+          <Route path="/model-performance" element={<Navigate to="/dashboard" replace />} />
           <Route path="/project-overview" element={<ProjectOverview />} />
           <Route path="/settings" element={<Settings />} />
         </Route>

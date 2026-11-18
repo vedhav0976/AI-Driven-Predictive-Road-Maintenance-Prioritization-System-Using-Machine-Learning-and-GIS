@@ -719,3 +719,15 @@
     width: 100%;
   }
 }
+
+.priority-chart-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.priority-chart-link:hover .chart-row-label span,
+.priority-chart-link:focus-visible .chart-row-label span {
+  color: #0d6b5b;
+  text-decoration: underline;
+}
