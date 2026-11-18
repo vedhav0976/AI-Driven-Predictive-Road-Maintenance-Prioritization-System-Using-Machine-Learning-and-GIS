@@ -46,6 +46,16 @@ function FitToResults({ coordinates }: { coordinates: Coordinate[] }) {
   return null;
 }
 
+function ResizeMap() {
+  const map = useMap();
+  useEffect(() => {
+    const observer = new ResizeObserver(() => map.invalidateSize({ pan: false }));
+    observer.observe(map.getContainer());
+    return () => observer.disconnect();
+  }, [map]);
+  return null;
+}
+
 function RoadMap() {
   const [baseRoads, setBaseRoads] = useState<BaseRoad[]>([]);
   const [layer, setLayer] = useState<PriorityMap | null>(null);
@@ -53,6 +63,22 @@ function RoadMap() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
+  const lastRefresh = useRef(0);
+
+  useEffect(() => {
+    lastRefresh.current = Date.now();
+    const refreshOnReturn = () => {
+      if (document.visibilityState !== "visible" || Date.now() - lastRefresh.current < 2000) return;
+      lastRefresh.current = Date.now();
+      setRefreshKey((key) => key + 1);
+    };
+    window.addEventListener("focus", refreshOnReturn);
+    document.addEventListener("visibilitychange", refreshOnReturn);
+    return () => {
+      window.removeEventListener("focus", refreshOnReturn);
+      document.removeEventListener("visibilitychange", refreshOnReturn);
+    };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -66,12 +92,12 @@ function RoadMap() {
   useEffect(() => {
     let active = true;
     void Promise.allSettled([
-      apiFetch<PriorityMap>("/api/map"),
-      apiFetch<{ records: InspectionObservation[] }>("/api/observations?limit=200"),
+      apiFetch<PriorityMap>("/api/map", { cache: "no-store" }),
+      apiFetch<{ records: InspectionObservation[] }>("/api/observations?limit=200", { cache: "no-store" }),
     ]).then(([mapResult, observationResult]) => {
       if (!active) return;
-      if (mapResult.status === "fulfilled") setLayer(mapResult.value);
-      if (observationResult.status === "fulfilled") setObservations(observationResult.value.records);
+      setLayer(mapResult.status === "fulfilled" ? mapResult.value : null);
+      setObservations(observationResult.status === "fulfilled" ? observationResult.value.records : []);
       if (mapResult.status === "rejected" || observationResult.status === "rejected") setError("Some live observations are unavailable. The local road map remains visible.");
       else setError(null);
       setLoading(false);
@@ -85,11 +111,11 @@ function RoadMap() {
 
   return <div className="content-page">
     <section className="section-heading"><div><p className="eyebrow">SPATIAL INTELLIGENCE</p><h1>Road condition map</h1><p>See where damage was observed and explore maintenance priorities by road.</p></div><div className="page-actions"><Link className="button-secondary" to="/road-assessment">Review assessments<ArrowUpRight size={16} /></Link><Link className="button-primary" to="/ai-analysis">Add an analysis<ArrowUpRight size={16} /></Link></div></section>
-    {error && <div className="map-notice" role="alert"><AlertTriangle size={18} /><span>We could not refresh the map data. {error}{layer ? " The last loaded observations are still visible." : ""}</span></div>}
+    {error && <div className="map-notice" role="alert"><AlertTriangle size={18} /><span>We could not refresh the map data. {error}</span></div>}
     <div className="map-summary-bar"><span className="map-location"><MapPinned size={17} />Bengaluru road coverage</span><span><strong>{matched}</strong> scored road segments</span><span><strong>{locatedObservations.length}</strong> located images</span><span className="status-badge ready">{loading ? "Loading observations…" : "Road map ready"}</span><button className="panel-action" type="button" onClick={() => { setLoading(true); setRefreshKey((key) => key + 1); }} disabled={loading}><RefreshCw size={15} />Refresh map data</button></div>
-    <section className="full-map-panel" aria-label="Road observations map"><MapContainer center={[12.976, 77.617]} zoom={14} scrollWheelZoom className="leaflet-map"><TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" /><FitToResults coordinates={coordinates} />
+    <section className="full-map-panel" aria-label="Road observations map"><MapContainer center={[12.976, 77.617]} zoom={14} scrollWheelZoom className="leaflet-map"><TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" /><ResizeMap /><FitToResults coordinates={coordinates} />
       {baseRoads.map((feature) => <Polyline key={feature.id} positions={roadPaths(feature.geometry)} pathOptions={{ color: "#64748b", weight: 3, opacity: 0.65 }} />)}
-      {layer?.features.map((feature) => <Polyline key={feature.id} positions={roadPaths(feature.geometry)} pathOptions={{ color: feature.properties.color, weight: 6, opacity: 0.85 }}><Popup><strong>{feature.properties.road_name ?? feature.id}</strong><br />Road ID: {feature.id}<br />Road hierarchy: {feature.properties.road_type ?? "Unknown"}<br />{feature.properties.near_critical_facility && <><strong>Critical facility nearby: {feature.properties.critical_facility_name ?? "Yes"} (+20% criticality)</strong><br /></>}Current PCI: {feature.properties.pci_score?.toFixed(1) ?? "Unassessed"}<br />MPI (0–100): {feature.properties.mpi_score?.toFixed(1) ?? "Unassessed"}<br />60-day projected PCI: {feature.properties.projected_pci_60d?.toFixed(1) ?? "—"}<br />Days to critical: {feature.properties.days_to_critical ?? "—"}<br />Priority: {feature.properties.priority ?? "Unassessed"}</Popup></Polyline>)}
+      {layer?.features.filter((feature) => feature.properties.priority).map((feature) => <Polyline key={feature.id} positions={roadPaths(feature.geometry)} pathOptions={{ color: feature.properties.color, weight: 6, opacity: 0.85 }}><Popup><strong>{feature.properties.road_name ?? feature.id}</strong><br />Road ID: {feature.id}<br />Road hierarchy: {feature.properties.road_type ?? "Unknown"}<br />{feature.properties.near_critical_facility && <><strong>Critical facility nearby: {feature.properties.critical_facility_name ?? "Yes"} (+20% criticality)</strong><br /></>}Current PCI: {feature.properties.pci_score?.toFixed(1) ?? "Unassessed"}<br />MPI (0–100): {feature.properties.mpi_score?.toFixed(1) ?? "Unassessed"}<br />60-day projected PCI: {feature.properties.projected_pci_60d?.toFixed(1) ?? "—"}<br />Days to critical: {feature.properties.days_to_critical ?? "—"}<br />Priority: {feature.properties.priority ?? "Unassessed"}</Popup></Polyline>)}
       {locatedObservations.map((item) => {
         const color = PRIORITY_COLORS[item.priority ?? "Unassessed"];
         return <CircleMarker key={item.id} center={[item.latitude!, item.longitude!]} radius={7} pathOptions={{ color, fillColor: color, fillOpacity: 0.9, weight: 2 }}><Popup><strong>{item.filename}</strong><br />{item.damage_types.map((value) => value.replace(/^D\d+_/, "").replaceAll("_", " ")).join(", ") || "No scored damage"}<br />GPS: {item.latitude?.toFixed(6)}, {item.longitude?.toFixed(6)}<br />Source: {item.location_source === "mapillary" ? "Mapillary coordinates" : item.location_source === "image_overlay" ? "Image coordinate stamp" : item.location_source === "manual" ? "Previously entered" : "EXIF metadata"}<br />Image priority proxy: {item.priority ?? "Unassessed"}<br />{item.road_id ? `Matched road: ${item.road_id}` : "Outside available road geometry"}{item.source_metadata?.provider === "mapillary" && <MapillaryAttribution source={item.source_metadata} />}</Popup></CircleMarker>;

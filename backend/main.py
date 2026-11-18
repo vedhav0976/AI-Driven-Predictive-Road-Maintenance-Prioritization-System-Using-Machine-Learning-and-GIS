@@ -789,6 +789,12 @@ def recheck_observation_location(observation_id: int) -> dict[str, Any]:
 def get_priority_map() -> dict[str, Any]:
     with get_session() as session:
         segments = session.scalars(select(RoadSegment).order_by(RoadSegment.segment_id)).all()
+        scored_segment_ids = set(session.scalars(
+            select(Observation.segment_id)
+            .join(DamageDetection, DamageDetection.observation_id == Observation.id)
+            .where(Observation.segment_id.is_not(None))
+            .distinct()
+        ))
         return {
             "type": "FeatureCollection",
             "features": [
@@ -799,13 +805,14 @@ def get_priority_map() -> dict[str, Any]:
                         "segment_id": segment.segment_id, "road_name": segment.road_name,
                         "road_type": segment.road_type,
                         "criticality_factor": segment.criticality_factor,
-                        "pci_score": segment.pci_score, "mpi_score": segment.mpi_score,
-                        "priority": segment.priority_tier,
+                        "pci_score": segment.pci_score if segment.segment_id in scored_segment_ids else None,
+                        "mpi_score": segment.mpi_score if segment.segment_id in scored_segment_ids else None,
+                        "priority": segment.priority_tier if segment.segment_id in scored_segment_ids else None,
                         "near_critical_facility": segment.near_critical_facility,
                         "critical_facility_name": segment.critical_facility_name,
-                        "projected_pci_60d": segment.projected_pci_60d,
-                        "days_to_critical": segment.days_to_critical,
-                        "color": {"High": "#dc2626", "Medium": "#f59e0b", "Low": "#2563eb"}.get(segment.priority_tier, "#64748b"),
+                        "projected_pci_60d": segment.projected_pci_60d if segment.segment_id in scored_segment_ids else None,
+                        "days_to_critical": segment.days_to_critical if segment.segment_id in scored_segment_ids else None,
+                        "color": {"High": "#dc2626", "Medium": "#f59e0b", "Low": "#2563eb"}.get(segment.priority_tier, "#64748b") if segment.segment_id in scored_segment_ids else "#64748b",
                     },
                 }
                 for segment in segments

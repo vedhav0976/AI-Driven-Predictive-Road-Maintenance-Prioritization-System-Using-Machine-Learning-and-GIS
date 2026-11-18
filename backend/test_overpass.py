@@ -57,6 +57,43 @@ class OverpassClientTests(unittest.TestCase):
                 check.assert_called_once()
         engine.dispose()
 
+    def test_refresh_clears_segment_score_when_only_unscored_images_remain(self):
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        with Session(engine) as session:
+            segment = RoadSegment(segment_id="osm-way-42", road_name="Main", road_type="residential",
+                criticality_factor=1.0, geometry_geojson='{"type":"LineString","coordinates":[[77,12],[77.001,12]]}',
+                pci_score=80, mpi_score=20, priority_tier="Low", projected_pci_60d=70, days_to_critical=100)
+            session.add(segment)
+            session.add(Observation(filename="clear.jpg", original_filename="clear.jpg", latitude=12, longitude=77,
+                geolocated=True, processed=True, raw_path="a", annotated_path="b", segment_id=segment.segment_id,
+                location_status="road_snapped", inference_ms=1))
+            session.flush()
+            refresh_road_segment(session, segment.segment_id)
+            self.assertIsNone(segment.pci_score)
+            self.assertIsNone(segment.mpi_score)
+            self.assertIsNone(segment.priority_tier)
+            self.assertIsNone(segment.projected_pci_60d)
+            self.assertIsNone(segment.days_to_critical)
+        engine.dispose()
+
+    def test_map_hides_historical_score_without_damage(self):
+        from backend.main import get_priority_map
+
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        with Session(engine) as session:
+            session.add(RoadSegment(segment_id="osm-way-42", road_name="Main", road_type="residential",
+                criticality_factor=1.0, geometry_geojson='{"type":"LineString","coordinates":[[77,12],[77.001,12]]}',
+                pci_score=80, mpi_score=20, priority_tier="Low"))
+            session.commit()
+        with patch("backend.main.get_session", side_effect=lambda: Session(engine)):
+            feature = get_priority_map()["features"][0]
+        self.assertIsNone(feature["properties"]["priority"])
+        self.assertIsNone(feature["properties"]["pci_score"])
+        self.assertEqual(feature["properties"]["color"], "#64748b")
+        engine.dispose()
+
 if __name__ == "__main__": unittest.main()
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session

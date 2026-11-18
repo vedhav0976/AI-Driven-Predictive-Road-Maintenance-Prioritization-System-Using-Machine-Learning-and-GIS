@@ -208,7 +208,13 @@ def refresh_road_segment(session: Session, segment_id: str | None) -> None:
         detections = session.scalars(select(DamageDetection).where(DamageDetection.observation_id == observation_id)).all()
         values = [penalty for detection in detections for code, penalty in penalties.items() if code in detection.class_name.upper()]
         if values: by_observation[observation_id] = sum(values)
-    if not by_observation: return
+    if not by_observation:
+        segment.pci_score = None
+        segment.mpi_score = None
+        segment.priority_tier = None
+        segment.projected_pci_60d = None
+        segment.days_to_critical = None
+        return
     avg_penalty = sum(by_observation.values()) / len(by_observation)
     pci = round(max(0.0, 100.0 - avg_penalty), 1)
     exposure = {"trunk": 1.5, "primary": 1.5, "secondary": 1.3, "tertiary": 1.2}.get(segment.road_type, 1.0)
