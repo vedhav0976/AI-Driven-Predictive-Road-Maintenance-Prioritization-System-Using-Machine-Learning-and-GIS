@@ -6,6 +6,7 @@ import { apiFetch, type DashboardData } from "../api";
 type Priority = "High" | "Medium" | "Low";
 const PRIORITIES: Priority[] = ["High", "Medium", "Low"];
 const PRIORITY_COLORS: Record<Priority, string> = { High: "#d85b52", Medium: "#d49b32", Low: "#16806a" };
+const DASHBOARD_TIMEOUT_MS = 20_000;
 const damageLabel = (value: string) => value.replace(/^D\d+_/, "").replaceAll("_", " ");
 
 function Dashboard() {
@@ -18,13 +19,25 @@ function Dashboard() {
 
   useEffect(() => {
     const controller = new AbortController();
+    let disposed = false;
+    let timedOut = false;
+    const timeout = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, DASHBOARD_TIMEOUT_MS);
     apiFetch<DashboardData>("/api/dashboard", { signal: controller.signal })
-      .then((result) => { setData(result); setError(null); })
+      .then((result) => { if (!disposed) { setData(result); setError(null); } })
       .catch((reason: unknown) => {
-        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "The dashboard could not be loaded.");
+        if (disposed) return;
+        setError(timedOut
+          ? "The analysis service did not respond within 20 seconds. Please try again shortly."
+          : reason instanceof Error ? reason.message : "The dashboard could not be loaded.");
       })
-      .finally(() => { if (!controller.signal.aborted) { setLoading(false); setRefreshing(false); } });
-    return () => controller.abort();
+      .finally(() => {
+        window.clearTimeout(timeout);
+        if (!disposed) { setLoading(false); setRefreshing(false); }
+      });
+    return () => { disposed = true; window.clearTimeout(timeout); controller.abort(); };
   }, [refreshKey]);
 
   useEffect(() => {
@@ -77,7 +90,7 @@ function Dashboard() {
           {!history.length && <div className="empty-state"><ClipboardCheck size={28} /><h3>No observations to show</h3><p>{data.detections ? "Choose another damage type to see its observations." : "New detections will appear here after image analysis."}</p></div>}
         </div>
         <div className="panel"><div className="panel-header"><div><p className="panel-kicker">ANALYSIS SERVICE</p><h2>Model &amp; data</h2></div><BrainCircuit size={21} /></div><div className="priority-summary">
-          <div className="dashboard-model-status"><strong>{data.model.name}</strong><span className={`status-badge ${data.model.status === "ready" ? "ready" : "warning"}`}>{data.model.status}</span></div>
+          <div className="dashboard-model-status"><strong>{data.model.name}</strong><span className={`status-badge ${data.model.status === "ready" ? "ready" : data.model.status === "unavailable" ? "warning" : ""}`}>{data.model.status === "available" ? "Loads on first analysis" : data.model.status}</span></div>
           <p>Validation evidence: {data.model_metrics.reported ? "training-reported results" : data.model_metrics.available ? "saved run results" : "not supplied"}.</p>
           <p>{data.unmatched_observations} observation{data.unmatched_observations === 1 ? " is" : "s are"} outside a matched road segment.</p>
           <Link className="panel-action" to="/model-performance">Explore model results<ArrowUpRight size={15} /></Link>

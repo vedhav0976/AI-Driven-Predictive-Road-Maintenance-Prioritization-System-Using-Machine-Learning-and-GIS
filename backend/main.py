@@ -11,7 +11,7 @@ import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from time import perf_counter
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
@@ -23,8 +23,10 @@ from starlette.datastructures import Headers
 from PIL import Image
 from sqlalchemy import delete, func, select, true
 from sqlalchemy.exc import IntegrityError
-from ultralytics import YOLO
 from dotenv import load_dotenv
+
+if TYPE_CHECKING:
+    from ultralytics import YOLO
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
 load_dotenv(Path(__file__).resolve().parents[1] / ".env.local", override=False)
@@ -113,10 +115,16 @@ logger = logging.getLogger("road_resilience.inference")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    started = perf_counter()
     initialize_database()
-    migrate_saved_images()
-    repair_duplicate_annotations()
-    backfill_saved_inferences()
+    logger.info("Database schema initialized in %.2f s", perf_counter() - started)
+    # Legacy data repair scans every saved image. Run it on persistent hosts,
+    # not on every short-lived Vercel function instance.
+    if os.getenv("ROAD_RESILIENCE_STARTUP_MAINTENANCE", "0" if os.getenv("VERCEL") == "1" else "1") == "1":
+        migrate_saved_images()
+        repair_duplicate_annotations()
+        backfill_saved_inferences()
+        logger.info("Startup maintenance completed in %.2f s", perf_counter() - started)
     yield
 
 
@@ -235,6 +243,8 @@ def load_model() -> YOLO:
         model_error = f"Model checkpoint not found: {MODEL_PATH}"
         raise RuntimeError(model_error)
     try:
+        from ultralytics import YOLO
+
         model = YOLO(str(MODEL_PATH))
         logger.info(
             "YOLO checkpoint loaded: checkpoint=%s task=%s names=%s",
@@ -311,15 +321,14 @@ DATASET_ROOT = (
 
 def model_info() -> dict[str, Any]:
     names: dict[int, str] = {}
-    status = "unavailable"
+    status = "available" if MODEL_PATH.exists() else "unavailable"
     error = model_error
-    try:
-        loaded = load_model()
-        names = {int(key): str(value) for key, value in loaded.names.items()}
+    if model is not None:
+        names = {int(key): str(value) for key, value in model.names.items()}
         status = "ready"
         error = None
-    except RuntimeError:
-        pass
+    elif model_error:
+        status = "unavailable"
     metrics = parse_metrics()
     run = SELECTED_MODEL["run"] if SELECTED_MODEL else metrics.get("run") if metrics.get("reported") else None
     name = SELECTED_MODEL["name"] if SELECTED_MODEL else (

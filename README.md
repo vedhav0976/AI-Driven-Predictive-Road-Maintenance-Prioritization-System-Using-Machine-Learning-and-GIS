@@ -70,7 +70,7 @@ python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 
 On the current Windows workspace, Python is not on `PATH`; the already-created local environment can be started with `.venv_short\Scripts\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 8000`. The `.venv_short` directory is ignored by Git.
 
-The API is at `http://127.0.0.1:8000`; interactive API documentation is at `http://127.0.0.1:8000/docs`. By default, the development frontend calls this address. `/health` can report `status: ok` while its nested `model.status` is `unavailable`; inspect that field to confirm inference readiness. The first model request may take time while Ultralytics loads the checkpoint.
+The API is at `http://127.0.0.1:8000`; interactive API documentation is at `http://127.0.0.1:8000/docs`. By default, the development frontend calls this address. `/health` reports API availability without importing the inference stack. Its nested `model.status` is `available` when the checkpoint is present but has not yet loaded, `ready` after a successful analysis loads it, or `unavailable` if the checkpoint is missing or loading failed. The first analysis may take time while Ultralytics loads the checkpoint.
 
 By default, inference history and both original and annotated image bytes use `backend/storage/road_resilience.sqlite3`. Existing disk images under `backend/storage/uploads/` and `backend/storage/annotated/` are copied into the database at startup; the files are retained as a migration backup. New uploads are stored in the database only. This directory is ignored by Git. To use PostgreSQL, start the optional service with `docker compose -f backend/docker-compose.yml up -d` and set `DATABASE_URL` to `postgresql+psycopg://road_user:road_password@localhost:5432/road_resilience` before starting the API. Change those example credentials for a deployed service. The schema is created automatically at startup.
 
@@ -155,6 +155,7 @@ When two detections cover nearly the same pixels (intersection over union at lea
 | `MAPILLARY_ACCESS_TOKEN` | Backend | Unset; enables live Mapillary imagery search and analysis |
 | `ROAD_RESILIENCE_DELETE_KEY` | Backend | Unset; deletion is disabled until a secret key is configured |
 | `DATABASE_URL` or `POSTGRES_URL_NON_POOLING` | Backend | SQLite database under `backend/storage/` when neither is set |
+| `ROAD_RESILIENCE_STARTUP_MAINTENANCE` | Backend | `0` on Vercel, `1` elsewhere; set to `1` for a one-off legacy image repair/backfill on a persistent worker |
 
 ### Current Vercel deployment (API migration pending)
 
@@ -187,7 +188,7 @@ This setup keeps the existing Supabase database; it does not provision a second 
 
 1. Push the repository, including `models/best.pt`, to GitHub. Keep `.env*`, `backend/storage/`, and local databases out of Git.
 2. Create a Render Blueprint from `render.yaml` and review the paid `1c-2g` Docker web service before confirming. The blueprint intentionally does not create a database. The Render service needs the existing Supabase PostgreSQL connection string, deletion secret, and Mapillary token. Enter these only in Render's secret environment-variable form; do not commit them. Use the Supabase session-pooler connection string so existing analyses remain visible.
-3. Wait for the service URL, then check `https://<render-service>.onrender.com/health`. Confirm the response reports the model ready before changing the frontend.
+3. Wait for the service URL, then check `https://<render-service>.onrender.com/health`. Confirm the response reports `status: ok` and nested `model.status: available` before changing the frontend. A controlled analysis verifies that inference loads the checkpoint and changes model status to `ready`.
 4. In the Vercel frontend project, set Production `VITE_API_URL` to the Render service's HTTPS origin (no trailing slash), then redeploy the frontend. Vite embeds this public URL at build time.
 5. In Render, set `ROAD_RESILIENCE_CORS` to `https://road-maintenance-ai.vercel.app` (the production value in the blueprint). Add any preview origins as needed. Test dashboard loading, History/images, Mapillary, and one controlled image upload.
 6. Once the Vercel frontend is confirmed to use Render, disable Git auto-deploys for the old Vercel API project and remove old preview/failed API deployments you no longer need. Keep the current production API deployment until cutover is verified, then delete the old Vercel API project if it is no longer needed. This prevents repeated large ML function deployments from continuing to consume Vercel Function Storage.

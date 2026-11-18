@@ -1,6 +1,7 @@
 """Focused checks for GPS, local matching, scoring, and saved API data."""
 
 import io
+import asyncio
 import json
 import os
 import tempfile
@@ -16,6 +17,27 @@ from backend.assessment import extract_gps, road_geometry, score_detections, sna
 from backend.annotations import box_iou, render_annotations, suppress_duplicate_boxes
 from backend.geotag import parse_overlay_coordinates
 from backend.preprocess_rdd import filter_dataset
+
+
+class StartupTests(unittest.TestCase):
+    def test_vercel_cold_start_skips_legacy_data_scans(self):
+        from backend import main
+
+        async def start():
+            async with main.lifespan(main.app):
+                pass
+
+        with patch.dict(os.environ, {"VERCEL": "1"}, clear=True), \
+                patch.object(main, "initialize_database") as initialize, \
+                patch.object(main, "migrate_saved_images") as migrate, \
+                patch.object(main, "repair_duplicate_annotations") as repair, \
+                patch.object(main, "backfill_saved_inferences") as backfill:
+            asyncio.run(start())
+
+        initialize.assert_called_once_with()
+        migrate.assert_not_called()
+        repair.assert_not_called()
+        backfill.assert_not_called()
 
 
 class AssessmentTests(unittest.TestCase):

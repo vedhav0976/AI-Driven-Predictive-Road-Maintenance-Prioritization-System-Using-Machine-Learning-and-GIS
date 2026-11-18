@@ -316,9 +316,9 @@ function AIDamageAnalysis() {
       {error && <div className="map-notice analysis-alert" role="alert"><AlertTriangle size={18} /><span>{error}</span></div>}
 
       <section className="ai-summary-grid">
-        <div className="ai-summary-card"><span>MODEL</span><strong>{model?.status === "ready" ? "Ready" : error ? "Unavailable" : "Loading"}</strong><p>{model?.name ?? "Connecting to the analysis service"}</p></div>
+        <div className="ai-summary-card"><span>MODEL</span><strong>{model?.status === "ready" ? "Ready" : model?.status === "available" ? "Available" : model?.status === "unavailable" || error ? "Unavailable" : "Loading"}</strong><p>{model?.name ?? "Connecting to the analysis service"}</p></div>
         <div className="ai-summary-card"><span>THRESHOLD</span><strong>{model ? `${Math.round(model.confidence_threshold * 100)}%` : "—"}</strong><p>Configured inference confidence</p></div>
-        <div className="ai-summary-card"><span>CLASSES</span><strong>{model ? Object.keys(model.class_names).length : "—"}</strong><p>Labels in the active checkpoint</p></div>
+        <div className="ai-summary-card"><span>CLASSES</span><strong>{model?.status === "ready" ? Object.keys(model.class_names).length : "—"}</strong><p>{model?.status === "available" ? "Shown after the first analysis loads the checkpoint" : "Labels in the active checkpoint"}</p></div>
         <div className="ai-summary-card"><span>WORKSPACE</span><strong>{busy || bulkBusy ? "Analyzing" : result || completeCount ? "Results saved" : "Ready to start"}</strong><p>{bulkBusy ? "Processing one image at a time" : "Saved results stay in History"}</p></div>
       </section>
 
